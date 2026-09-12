@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test Backend API Connectivity
-Quick script to verify the aegis backend is working
+Quick script to verify the hydra backend is working
 """
 
 import requests

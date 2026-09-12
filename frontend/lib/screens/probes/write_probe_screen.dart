@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/monokai-sublime.dart';
-import 'package:aegis/l10n/app_localizations.dart';
+import 'package:hydra/l10n/app_localizations.dart';
 import '../../config/constants.dart';
 import '../../models/custom_probe.dart';
 import '../../providers/custom_probe_provider.dart';

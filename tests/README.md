@@ -1,6 +1,6 @@
-# Aegis - LLM Test Suite
+# Hydra - LLM Test Suite
 
-Modular, section-based LLM security testing using the Aegis backend and Garak framework.
+Modular, section-based LLM security testing using the Hydra backend and Garak framework.
 
 ## Overview
 
@@ -19,7 +19,7 @@ This test suite provides **automated LLM vulnerability scanning** split into foc
 ## Architecture
 
 ```
-aegis/tests/
+hydra/tests/
 ├── __init__.py                   # Package initialization
 ├── test_config.py                # Central configuration
 ├── section_1_prompt_injection.py # Prompt injection tests
@@ -37,9 +37,9 @@ aegis/tests/
 
 ### 1. Running Services
 
-**Aegis Backend** (port 8888):
+**Hydra Backend** (port 8888):
 ```bash
-cd /Users/innox/projects/garak/aegis/backend
+cd /Users/innox/projects/garak/hydra/backend
 python main.py
 ```
 
@@ -52,7 +52,7 @@ python main.py
 ### 2. Dependencies
 
 ```bash
-cd /Users/innox/projects/garak/aegis/tests
+cd /Users/innox/projects/garak/hydra/tests
 pip install -r requirements.txt
 ```
 
@@ -63,7 +63,7 @@ pip install -r requirements.txt
 Run the master test runner for an interactive menu:
 
 ```bash
-cd /Users/innox/projects/garak/aegis/tests
+cd /Users/innox/projects/garak/hydra/tests
 python run_all_tests.py
 ```
 
@@ -296,7 +296,7 @@ reports/
 curl http://localhost:8888/health
 
 # Start backend if needed
-cd /Users/innox/projects/garak/aegis/backend
+cd /Users/innox/projects/garak/hydra/backend
 python main.py
 ```
 
@@ -379,7 +379,7 @@ for test in failures:
 
 ## Best Practices
 
-1. **Run backend first** - Ensure aegis backend is running
+1. **Run backend first** - Ensure hydra backend is running
 2. **Check connectivity** - Verify Open WebUI and Ollama are accessible
 3. **Start with one section** - Test individual sections before full run
 4. **Monitor resources** - LLM testing is resource-intensive
@@ -397,12 +397,12 @@ To add new test sections:
 
 ## License
 
-Same as parent Aegis project
+Same as parent Hydra project
 
 ## Support
 
 For issues or questions:
-- Check backend logs: `/Users/innox/projects/garak/aegis/backend/backend.log`
+- Check backend logs: `/Users/innox/projects/garak/hydra/backend/backend.log`
 - Review Garak docs: https://github.com/NVIDIA/garak
 - Check test reports in `reports/` directory
 
@@ -411,6 +411,6 @@ For issues or questions:
 **Ready to test?**
 
 ```bash
-cd /Users/innox/projects/garak/aegis/tests
+cd /Users/innox/projects/garak/hydra/tests
 python run_all_tests.py
 ```

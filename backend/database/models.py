@@ -1,5 +1,5 @@
 """
-SQLAlchemy ORM models for Aegis database.
+SQLAlchemy ORM models for Hydra database.
 
 Tables:
   - scans: Scan metadata (replaces parsing JSONL first entries)

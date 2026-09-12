@@ -1,6 +1,6 @@
-# Aegis API Error Codes Reference
+# Hydra API Error Codes Reference
 
-This document lists all HTTP status codes and error responses used by the Aegis backend API.
+This document lists all HTTP status codes and error responses used by the Hydra backend API.
 
 ---
 

@@ -1,5 +1,5 @@
 """
-Database package for Aegis backend.
+Database package for Hydra backend.
 
 Provides persistence via SQLAlchemy for scan metadata, config templates,
 and custom probe metadata. Supports PostgreSQL (production) and SQLite

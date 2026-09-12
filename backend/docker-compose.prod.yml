@@ -13,13 +13,13 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    container_name: aegis-ollama
+    container_name: hydra-ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
     networks:
-      - aegis-network
+      - hydra-network
     restart: unless-stopped
     # Uncomment for GPU support:
     # deploy:

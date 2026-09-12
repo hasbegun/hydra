@@ -37,7 +37,7 @@ def _get_minio_client():
 
 
 def _get_bucket() -> str:
-    return os.environ.get("MINIO_BUCKET", "aegis-reports")
+    return os.environ.get("MINIO_BUCKET", "hydra-reports")
 
 
 def _ensure_bucket(client, bucket: str) -> None:

@@ -1,6 +1,6 @@
-# Aegis CLI Testing Guide
+# Hydra CLI Testing Guide
 
-This guide lists all CLI commands for testing the Aegis containerized services. Use these commands to verify everything works correctly after deployment.
+This guide lists all CLI commands for testing the Hydra containerized services. Use these commands to verify everything works correctly after deployment.
 
 ## Prerequisites
 
@@ -9,10 +9,10 @@ Start the services first:
 ```bash
 # Development mode (hot reload)
 cd backend
-make aegis-dev
+make hydra-dev
 
 # Or production mode (with Ollama container)
-make aegis-prod
+make hydra-prod
 ```
 
 ---
@@ -76,7 +76,7 @@ Expected:
 
 ```bash
 make health          # Backend health
-make aegis-garak-health    # Garak service health (via backend container)
+make hydra-garak-health    # Garak service health (via backend container)
 ```
 
 ---
@@ -125,7 +125,7 @@ curl -s http://localhost:8888/ | python -m json.tool
 Expected:
 ```json
 {
-    "name": "Aegis Backend API",
+    "name": "Hydra Backend API",
     "version": "1.0.0",
     "status": "running",
     "docs": "/api/docs"
@@ -477,28 +477,28 @@ curl -s http://localhost:8888/api/v1/scan/{scan_id}/report/detailed
 
 | Command | Description |
 |---------|-------------|
-| `make aegis-dev` | Start dev mode (hot reload, local Ollama) |
-| `make aegis-dev-down` | Stop dev mode |
-| `make aegis-dev-logs` | Follow dev mode logs |
-| `make aegis-dev-restart` | Restart dev services |
-| `make aegis-up` | Start default mode (detached) |
-| `make aegis-up-build` | Build and start |
-| `make aegis-down` | Stop services |
-| `make aegis-down-v` | Stop and remove volumes |
-| `make aegis-prod` | Start prod mode (backend + garak + ollama) |
-| `make aegis-prod-down` | Stop prod mode |
-| `make aegis-prod-logs` | Follow prod mode logs |
+| `make hydra-dev` | Start dev mode (hot reload, local Ollama) |
+| `make hydra-dev-down` | Stop dev mode |
+| `make hydra-dev-logs` | Follow dev mode logs |
+| `make hydra-dev-restart` | Restart dev services |
+| `make hydra-up` | Start default mode (detached) |
+| `make hydra-up-build` | Build and start |
+| `make hydra-down` | Stop services |
+| `make hydra-down-v` | Stop and remove volumes |
+| `make hydra-prod` | Start prod mode (backend + garak + ollama) |
+| `make hydra-prod-down` | Stop prod mode |
+| `make hydra-prod-logs` | Follow prod mode logs |
 
 ### Debugging
 
 | Command | Description |
 |---------|-------------|
-| `make aegis-logs` | Follow all service logs |
-| `make aegis-ps` | List running services |
-| `make aegis-config` | Validate and view compose config |
-| `make aegis-garak-shell` | Shell into garak container |
-| `make aegis-garak-logs` | Follow garak service logs |
-| `make aegis-garak-health` | Check garak service health |
+| `make hydra-logs` | Follow all service logs |
+| `make hydra-ps` | List running services |
+| `make hydra-config` | Validate and view compose config |
+| `make hydra-garak-shell` | Shell into garak container |
+| `make hydra-garak-logs` | Follow garak service logs |
+| `make hydra-garak-health` | Check garak service health |
 | `make docker-status` | Show container status |
 
 ### Direct Docker Compose
@@ -607,7 +607,7 @@ Run these commands in sequence to verify the full stack is working:
 ```bash
 # 1. Start services
 cd backend
-make aegis-dev
+make hydra-dev
 
 # 2. Wait for services to be ready
 sleep 10
@@ -649,13 +649,13 @@ The backend cannot reach the garak service. Check:
 
 ```bash
 # Are both containers running?
-make aegis-ps
+make hydra-ps
 
 # Check garak container logs
-make aegis-garak-logs
+make hydra-garak-logs
 
 # Test garak health from inside the network
-make aegis-garak-health
+make hydra-garak-health
 ```
 
 ### Scan starts but no progress
@@ -663,7 +663,7 @@ make aegis-garak-health
 Check garak service logs for subprocess errors:
 
 ```bash
-make aegis-garak-logs
+make hydra-garak-logs
 ```
 
 Common causes:

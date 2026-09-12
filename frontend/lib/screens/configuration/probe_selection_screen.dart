@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:aegis/l10n/app_localizations.dart';
+import 'package:hydra/l10n/app_localizations.dart';
 import '../../config/constants.dart';
 import '../../providers/plugins_provider.dart';
 import '../../providers/scan_config_provider.dart';

@@ -39,7 +39,7 @@ def _get_default_db_url() -> str:
     from config import settings
     db_dir = settings.garak_reports_path
     db_dir.mkdir(parents=True, exist_ok=True)
-    db_path = db_dir / "aegis.db"
+    db_path = db_dir / "hydra.db"
     return f"sqlite:///{db_path}"
 
 

@@ -32,7 +32,7 @@ python3 -m pytest tests/test_database.py tests/test_h1_1_object_store.py \
   tests/test_scan_statistics.py tests/test_concurrent_scans.py \
   tests/test_cli_flags.py tests/test_logging_config.py -v
 
-# Inside container (requires make aegis-dev)
+# Inside container (requires make hydra-dev)
 make test
 
 # Single suite
@@ -114,25 +114,25 @@ ollama pull llama3.2:1b   # or any small model
 
 # Start the full stack
 cd backend
-make aegis-dev
+make hydra-dev
 ```
 
 ### 3.2 Container Health (T1)
 
 | ID | Step | Expected | Command |
 |----|------|----------|---------|
-| T1.1 | All 4 containers running | backend, garak, postgres, minio all "Up" | `make aegis-ps` |
+| T1.1 | All 4 containers running | backend, garak, postgres, minio all "Up" | `make hydra-ps` |
 | T1.2 | Backend health | `{"status": "ok"}` | `curl http://localhost:8888/health` |
-| T1.3 | Garak health (via backend) | "healthy" response | `make aegis-garak-health` |
-| T1.4 | PostgreSQL accepting connections | `pg_isready` succeeds | `docker compose exec postgres pg_isready -U aegis` |
+| T1.3 | Garak health (via backend) | "healthy" response | `make hydra-garak-health` |
+| T1.4 | PostgreSQL accepting connections | `pg_isready` succeeds | `docker compose exec postgres pg_isready -U hydra` |
 | T1.5 | Minio console accessible | Web UI loads | Open `http://localhost:9001` (credentials from `.env`: MINIO_ROOT_USER / MINIO_ROOT_PASSWORD) |
-| T1.6 | Minio bucket exists | `aegis-reports` bucket listed | Check Minio console > Buckets |
+| T1.6 | Minio bucket exists | `hydra-reports` bucket listed | Check Minio console > Buckets |
 
 ### 3.3 Database Connectivity (T2)
 
 | ID | Step | Expected | Command |
 |----|------|----------|---------|
-| T2.1 | Connect to PostgreSQL | psql prompt opens | `docker compose exec postgres psql -U aegis -d aegis` |
+| T2.1 | Connect to PostgreSQL | psql prompt opens | `docker compose exec postgres psql -U hydra -d hydra` |
 | T2.2 | Tables exist | scans, config_templates, custom_probes, db_meta | `\dt` in psql |
 | T2.3 | Schema version set | Row: key=schema_version, value=1 | `SELECT * FROM db_meta;` |
 | T2.4 | Scans table has new columns | report_key, html_report_key, probe_stats_json | `\d scans` in psql |
@@ -148,7 +148,7 @@ This is the critical path. Run a real scan and verify data flows through all com
 | T3.2 | Poll scan progress | Status transitions: pending → running → completed | `curl http://localhost:8888/api/v1/scan/{scan_id}/status` (poll every 5s) |
 | T3.3 | WebSocket progress | Events streamed (progress %, probe names) | `websocat ws://localhost:8888/api/v1/scan/{scan_id}/progress` |
 | T3.4 | Scan appears in DB | Row with correct target_type, target_name, status | `SELECT id, status, target_type, target_name FROM scans;` (in psql) |
-| T3.5 | Report uploaded to Minio | Objects under `{scan_id}/` prefix | Check Minio console > aegis-reports > browse |
+| T3.5 | Report uploaded to Minio | Objects under `{scan_id}/` prefix | Check Minio console > hydra-reports > browse |
 | T3.6 | Report keys stored in DB | report_key and html_report_key populated | `SELECT id, report_key, html_report_key FROM scans WHERE id='{scan_id}';` |
 | T3.7 | Scan results endpoint works | JSON with passed/failed counts, entries | `curl http://localhost:8888/api/v1/scan/{scan_id}/results` |
 | T3.8 | HTML report accessible | HTML content returned | `curl http://localhost:8888/api/v1/scan/{scan_id}/report/html` |
@@ -173,7 +173,7 @@ This is the critical path. Run a real scan and verify data flows through all com
 | T5.1 | Note current scan count | N scans in DB | `SELECT count(*) FROM scans;` |
 | T5.2 | Restart backend container | Backend restarts | `docker compose restart backend` |
 | T5.3 | Scan history preserved | Same N scans returned | `curl http://localhost:8888/api/v1/scan/history` |
-| T5.4 | Restart all containers | Full stack restart | `make aegis-dev-down && make aegis-dev` |
+| T5.4 | Restart all containers | Full stack restart | `make hydra-dev-down && make hydra-dev` |
 | T5.5 | Scan history still preserved | Same N scans (pg-data volume persists) | `curl http://localhost:8888/api/v1/scan/history` |
 
 ### 3.7 Config Templates — DB Persistence (T6)
@@ -201,8 +201,8 @@ This is the critical path. Run a real scan and verify data flows through all com
 
 | ID | Step | Expected | Command |
 |----|------|----------|---------|
-| T8.1 | Backend has no shared volume with garak | No `garak-reports` or `garak-scratch` mount on backend | `docker inspect aegis-backend \| grep -i mount` |
-| T8.2 | Garak has own scratch volume | `garak-scratch` mounted at `/data/garak_reports` | `docker inspect aegis-garak \| grep -i mount` |
+| T8.1 | Backend has no shared volume with garak | No `garak-reports` or `garak-scratch` mount on backend | `docker inspect hydra-backend \| grep -i mount` |
+| T8.2 | Garak has own scratch volume | `garak-scratch` mounted at `/data/garak_reports` | `docker inspect hydra-garak \| grep -i mount` |
 | T8.3 | Backend reports dir is /tmp | GARAK_REPORTS_DIR=/tmp/garak_reports | `docker compose exec backend env \| grep GARAK_REPORTS` |
 
 ---
@@ -289,7 +289,7 @@ Final sanity check that the architecture matches the design:
 | A2 | Backend connects to PostgreSQL, not SQLite | Check `DATABASE_URL` env var in container: `docker compose exec backend env \| grep DATABASE` |
 | A3 | Backend connects to Minio | Check `MINIO_ENDPOINT` env var: `docker compose exec backend env \| grep MINIO` |
 | A4 | Garak service connects to Minio | Check `MINIO_ENDPOINT` env var: `docker compose exec garak env \| grep MINIO` |
-| A5 | 4 containers on same network | `docker network inspect aegis_aegis-network` shows all 4 |
-| A6 | PostgreSQL data persists across restarts | pg-data named volume: `docker volume inspect aegis_pg-data` |
-| A7 | Minio data persists across restarts | minio-data named volume: `docker volume inspect aegis_minio-data` |
-| A8 | Garak scratch is ephemeral (own volume) | garak-scratch not shared: `docker volume inspect aegis_garak-scratch` |
+| A5 | 4 containers on same network | `docker network inspect hydra_hydra-network` shows all 4 |
+| A6 | PostgreSQL data persists across restarts | pg-data named volume: `docker volume inspect hydra_pg-data` |
+| A7 | Minio data persists across restarts | minio-data named volume: `docker volume inspect hydra_minio-data` |
+| A8 | Garak scratch is ephemeral (own volume) | garak-scratch not shared: `docker volume inspect hydra_garak-scratch` |

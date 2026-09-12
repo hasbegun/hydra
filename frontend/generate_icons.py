@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
 Generate app icons for iOS, Android, macOS, Windows, and Linux
-from the source aegis_logo.png
+from the source hydra_logo.png
 """
 
 import os
 from PIL import Image
 
 # Source logo
-SOURCE_LOGO = "/Users/innox/projects/garak/aegis/frontend/aegis_logo.png"
-FRONTEND_DIR = "/Users/innox/projects/garak/aegis/frontend"
+SOURCE_LOGO = "/Users/innox/projects/garak/hydra/frontend/hydra_logo.png"
+FRONTEND_DIR = "/Users/innox/projects/garak/hydra/frontend"
 
 # Icon sizes for different platforms
 ICON_SIZES = {
@@ -73,7 +73,7 @@ ICON_SIZES = {
     "linux": {
         "path": "linux",
         "sizes": [
-            ("aegis_logo.png", 512),  # Main icon
+            ("hydra_logo.png", 512),  # Main icon
         ]
     },
 

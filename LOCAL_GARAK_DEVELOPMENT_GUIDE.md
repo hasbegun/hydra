@@ -1,6 +1,6 @@
 # Local Garak Development Guide
 
-This guide explains how to work with the local copy of garak in the Aegis project, make modifications, and implement enhanced reporting features.
+This guide explains how to work with the local copy of garak in the Hydra project, make modifications, and implement enhanced reporting features.
 
 ## Table of Contents
 
@@ -26,7 +26,7 @@ This guide explains how to work with the local copy of garak in the Aegis projec
 1. **Navigate to the backend directory**:
 
 ```bash
-cd /path/to/garak/aegis/backend
+cd /path/to/garak/hydra/backend
 ```
 
 2. **Create and activate a virtual environment** (recommended):
@@ -60,7 +60,7 @@ You should see the garak version (e.g., `0.13.3.pre1`).
 ## Project Structure
 
 ```
-aegis/
+hydra/
 ├── backend/
 │   ├── garak/                      # Local copy of garak (editable install)
 │   │   ├── garak/                  # Main garak package
@@ -79,7 +79,7 @@ aegis/
 │   │   │   └── report.py           # Report class
 │   │   ├── pyproject.toml          # Garak package configuration
 │   │   └── README.md
-│   ├── api/                        # Aegis API routes
+│   ├── api/                        # Hydra API routes
 │   ├── services/
 │   │   └── garak_wrapper.py        # ⭐ Garak CLI wrapper
 │   ├── requirements.txt            # ⭐ Now includes -e ./garak
@@ -101,7 +101,7 @@ Since garak is installed in editable mode (`-e ./garak`), you can modify files d
 
 ```bash
 # Example: Modify the Attempt class
-vim aegis/backend/garak/garak/attempt.py
+vim hydra/backend/garak/garak/attempt.py
 ```
 
 2. **Changes are immediately active** - no reinstall needed!
@@ -110,7 +110,7 @@ vim aegis/backend/garak/garak/attempt.py
 
 ```bash
 # Run garak from command line
-cd aegis/backend
+cd hydra/backend
 python -m garak --help
 
 # Or import in Python
@@ -120,9 +120,9 @@ python
 >>> # Your code here
 ```
 
-### Using Local Garak in Aegis Backend
+### Using Local Garak in Hydra Backend
 
-The Aegis backend (`garak_wrapper.py`) runs garak as a subprocess. With the local installation, it will use your modified version.
+The Hydra backend (`garak_wrapper.py`) runs garak as a subprocess. With the local installation, it will use your modified version.
 
 **Option 1: Continue using subprocess (current approach)**
 
@@ -167,7 +167,7 @@ Follow these steps to add detailed scan information and mitigation recommendatio
 
 ### Step 1: Enhance the Attempt Data Model
 
-**File**: `aegis/backend/garak/garak/attempt.py`
+**File**: `hydra/backend/garak/garak/attempt.py`
 
 Add new fields to the `Attempt` class:
 
@@ -237,7 +237,7 @@ def as_dict(self) -> dict:
 
 ### Step 2: Add Metadata to Probe Base Class
 
-**File**: `aegis/backend/garak/garak/probes/base.py`
+**File**: `hydra/backend/garak/garak/probes/base.py`
 
 ```python
 class Probe:
@@ -261,7 +261,7 @@ class Probe:
 
 ### Step 3: Enhance Specific Probes
 
-**Example**: `aegis/backend/garak/garak/probes/dan.py`
+**Example**: `hydra/backend/garak/garak/probes/dan.py`
 
 ```python
 from datetime import datetime
@@ -344,7 +344,7 @@ class DAN_Jailbreak(Probe):
 
 ### Step 4: Create Developer Report Generator
 
-**File**: `aegis/backend/garak/garak/analyze/report_developer.py` (NEW FILE)
+**File**: `hydra/backend/garak/garak/analyze/report_developer.py` (NEW FILE)
 
 ```python
 #!/usr/bin/env python3
@@ -508,9 +508,9 @@ if __name__ == '__main__':
     generate_developer_report(sys.argv[1])
 ```
 
-### Step 5: Update Aegis Backend to Parse New Fields
+### Step 5: Update Hydra Backend to Parse New Fields
 
-**File**: `aegis/backend/services/garak_wrapper.py`
+**File**: `hydra/backend/services/garak_wrapper.py`
 
 Add a method to extract vulnerability information:
 
@@ -574,7 +574,7 @@ def get_vulnerabilities(self, scan_id: str) -> List[Dict[str, Any]]:
 
 ### Step 6: Add API Endpoint
 
-**File**: `aegis/backend/api/routes/scan.py`
+**File**: `hydra/backend/api/routes/scan.py`
 
 ```python
 @router.get("/{scan_id}/vulnerabilities", response_model=List[Dict[str, Any]])
@@ -622,7 +622,7 @@ print("✅ Attempt enhancements work!")
 
 ```bash
 # Run garak with an enhanced probe
-cd aegis/backend
+cd hydra/backend
 python -m garak \
     --target_type ollama \
     --target_name gemma3 \
@@ -647,11 +647,11 @@ python -m garak.analyze.report_developer ~/.local/share/garak/garak_runs/garak.<
 cat ~/.local/share/garak/garak_runs/garak.<scan-id>.developer.md
 ```
 
-### Test 4: Test Aegis API Integration
+### Test 4: Test Hydra API Integration
 
 ```bash
-# Start Aegis backend
-cd aegis/backend
+# Start Hydra backend
+cd hydra/backend
 python main.py
 
 # In another terminal, run a scan via API
@@ -679,7 +679,7 @@ curl http://localhost:8888/api/v1/scan/<scan-id>/vulnerabilities
 
 ```bash
 pip show garak | grep Location
-# Should point to: /path/to/aegis/backend/garak
+# Should point to: /path/to/hydra/backend/garak
 
 # If not, reinstall in editable mode:
 pip uninstall garak
@@ -700,13 +700,13 @@ def _attempt_prestore_hook(self, attempt, seq):
     # ... rest of code
 ```
 
-### Issue: Aegis backend can't find garak
+### Issue: Hydra backend can't find garak
 
 **Solution**: Set `GARAK_PATH` in `.env`:
 
 ```bash
-# aegis/backend/.env
-GARAK_PATH=/path/to/aegis/backend/venv/bin/garak
+# hydra/backend/.env
+GARAK_PATH=/path/to/hydra/backend/venv/bin/garak
 ```
 
 ---
@@ -723,12 +723,12 @@ python -m garak --help
 # Generate developer report
 python -m garak.analyze.report_developer <report.jsonl>
 
-# Start Aegis backend
-cd aegis/backend
+# Start Hydra backend
+cd hydra/backend
 python main.py
 
 # Run tests
-pytest aegis/tests/
+pytest hydra/tests/
 
 # Check garak location
 pip show garak

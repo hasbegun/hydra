@@ -9,7 +9,7 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
-  String get appName => 'Aegis';
+  String get appName => 'Hydra';
 
   @override
   String get appDescription => 'LLM漏洞扫描器';

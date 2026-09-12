@@ -1,4 +1,4 @@
-# Aegis Backend API - Lightweight FastAPI service
+# Hydra Backend API - Lightweight FastAPI service
 # Garak now runs in its own container (see Dockerfile.garak)
 
 FROM python:3.11-slim

@@ -48,7 +48,7 @@ All backend components are fully functional and ready to capture workflow data:
 The Dart models use `freezed` for immutability. Generate the code:
 
 ```bash
-cd aegis/frontend
+cd hydra/frontend
 flutter pub get
 flutter pub run build_runner build --delete-conflicting-outputs
 ```
@@ -561,7 +561,7 @@ TabBarView(
 
 1. **Start Backend:**
    ```bash
-   cd aegis/backend
+   cd hydra/backend
    python main.py
    ```
 
@@ -573,7 +573,7 @@ TabBarView(
 
 3. **Run Frontend:**
    ```bash
-   cd aegis/frontend
+   cd hydra/frontend
    flutter run -d macos
    ```
 

@@ -1,4 +1,4 @@
-# Aegis Test Suite Dependencies
+# Hydra Test Suite Dependencies
 
 # HTTP client for API communication
 requests>=2.31.0
@@ -9,5 +9,5 @@ python-dotenv>=1.0.0
 # Optional: Better HTTP debugging
 # httpx>=0.25.0
 
-# Note: The aegis backend must be running separately
-# See: /Users/innox/projects/garak/aegis/backend/README.md
+# Note: The hydra backend must be running separately
+# See: /Users/innox/projects/garak/hydra/backend/README.md

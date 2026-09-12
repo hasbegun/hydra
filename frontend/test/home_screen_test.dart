@@ -9,11 +9,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:aegis/screens/home/home_screen.dart';
-import 'package:aegis/providers/api_provider.dart';
-import 'package:aegis/providers/background_scans_provider.dart';
-import 'package:aegis/services/background_scan_service.dart';
-import 'package:aegis/config/constants.dart';
+import 'package:hydra/screens/home/home_screen.dart';
+import 'package:hydra/providers/api_provider.dart';
+import 'package:hydra/providers/background_scans_provider.dart';
+import 'package:hydra/services/background_scan_service.dart';
+import 'package:hydra/config/constants.dart';
 
 import 'helpers/pump_app.dart';
 

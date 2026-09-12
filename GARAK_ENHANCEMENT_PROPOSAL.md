@@ -37,7 +37,7 @@ Current reports show:
 
 ### 1. Enhanced Attempt Object
 
-**Location**: `aegis/backend/garak/garak/attempt.py`
+**Location**: `hydra/backend/garak/garak/attempt.py`
 
 Add new fields to the `Attempt` class:
 
@@ -74,7 +74,7 @@ class Attempt:
 
 ### 2. Probe Metadata Enhancement
 
-**Location**: `aegis/backend/garak/garak/probes/base.py`
+**Location**: `hydra/backend/garak/garak/probes/base.py`
 
 Add metadata to probe classes:
 
@@ -188,7 +188,7 @@ Each attempt entry will include:
 
 #### 3.2 New Developer Report Format (Markdown)
 
-**Location**: `aegis/backend/garak/garak/analyze/report_developer.py` (NEW FILE)
+**Location**: `hydra/backend/garak/garak/analyze/report_developer.py` (NEW FILE)
 
 Generate a developer-friendly markdown report:
 
@@ -452,7 +452,7 @@ garak --target_type ollama \
 
 #### Phase 4: Backend Integration (Week 4)
 
-1. **Update `aegis/backend/services/garak_wrapper.py`**:
+1. **Update `hydra/backend/services/garak_wrapper.py`**:
    - Parse new JSONL fields
    - Expose mitigation data via API
    - Add filtering by severity
@@ -472,7 +472,7 @@ garak --target_type ollama \
 
 ### 5. Example Probe Implementation
 
-**File**: `aegis/backend/garak/garak/probes/dan.py`
+**File**: `hydra/backend/garak/garak/probes/dan.py`
 
 ```python
 # Add this to existing DAN probes
@@ -559,8 +559,8 @@ class DAN_Jailbreak(Probe):
 | `garak/analyze/report_developer.py` | **New** | Create developer-friendly markdown reporter |
 | `garak/analyze/templates/digest_mitigation.jinja` | **New** | Mitigation section template |
 | `garak/analyze/templates/digest_vulnerability.jinja` | **New** | Vulnerability card template |
-| `aegis/backend/services/garak_wrapper.py` | **Modify** | Parse and expose new fields via API |
-| `aegis/backend/api/routes/scan.py` | **Modify** | Add endpoints for vulnerabilities and mitigations |
+| `hydra/backend/services/garak_wrapper.py` | **Modify** | Parse and expose new fields via API |
+| `hydra/backend/api/routes/scan.py` | **Modify** | Add endpoints for vulnerabilities and mitigations |
 
 ### 7. Benefits
 

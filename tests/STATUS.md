@@ -2,7 +2,7 @@
 
 ## ✅ Backend Integration Fixed
 
-The test suite is now properly configured to work with the aegis backend.
+The test suite is now properly configured to work with the hydra backend.
 
 ### What Was Fixed
 

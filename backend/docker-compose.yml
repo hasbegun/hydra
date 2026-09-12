@@ -1,19 +1,19 @@
-name: aegis
+name: hydra
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: aegis-postgres
+    container_name: hydra-postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-aegis}
-      POSTGRES_USER: ${POSTGRES_USER:-aegis}
+      POSTGRES_DB: ${POSTGRES_DB:-hydra}
+      POSTGRES_USER: ${POSTGRES_USER:-hydra}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - pg-data:/var/lib/postgresql/data
     networks:
-      - aegis-network
+      - hydra-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aegis}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hydra}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,17 +21,17 @@ services:
 
   minio:
     image: minio/minio:latest
-    container_name: aegis-minio
+    container_name: hydra-minio
     command: server /data --console-address ":9001"
     ports:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-aegis}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-hydra}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
     volumes:
       - minio-data:/data
     networks:
-      - aegis-network
+      - hydra-network
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
@@ -43,8 +43,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: aegis-backend
-    container_name: aegis-backend
+    image: hydra-backend
+    container_name: hydra-backend
     ports:
       - "${PORT:-8888}:8888"
     environment:
@@ -56,14 +56,14 @@ services:
       LOG_FORMAT: "${LOG_FORMAT:-json}"
 
       # Database (PostgreSQL)
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-aegis}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-aegis}"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-hydra}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-hydra}"
 
       # Object Storage (Minio)
       STORAGE_BACKEND: "${STORAGE_BACKEND:-minio}"
       MINIO_ENDPOINT: "minio:9000"
-      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-aegis}"
+      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-hydra}"
       MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}"
-      MINIO_BUCKET: "${MINIO_BUCKET:-aegis-reports}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-hydra-reports}"
       MINIO_SECURE: "false"
 
       # Garak Configuration
@@ -73,7 +73,7 @@ services:
       # Ollama (for model discovery / validation)
       OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
     networks:
-      - aegis-network
+      - hydra-network
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,8 +93,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.garak
-    image: aegis-garak
-    container_name: aegis-garak
+    image: hydra-garak
+    container_name: hydra-garak
     environment:
       GARAK_REPORTS_DIR: "/data/garak_reports"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
@@ -102,9 +102,9 @@ services:
 
       # Object Storage (Minio)
       MINIO_ENDPOINT: "minio:9000"
-      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-aegis}"
+      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-hydra}"
       MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}"
-      MINIO_BUCKET: "${MINIO_BUCKET:-aegis-reports}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-hydra-reports}"
       MINIO_SECURE: "false"
 
       # Ollama host (garak needs this to connect to LLMs)
@@ -123,7 +123,7 @@ services:
       # Local-only scratch space for garak CLI output before upload to Minio
       - garak-scratch:/data/garak_reports
     networks:
-      - aegis-network
+      - hydra-network
     depends_on:
       minio:
         condition: service_healthy
@@ -144,5 +144,5 @@ volumes:
     driver: local
 
 networks:
-  aegis-network:
+  hydra-network:
     driver: bridge

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:aegis/l10n/app_localizations.dart';
+import 'package:hydra/l10n/app_localizations.dart';
 import 'screens/home/home_screen.dart';
 import 'config/constants.dart';
 import 'providers/theme_provider.dart';

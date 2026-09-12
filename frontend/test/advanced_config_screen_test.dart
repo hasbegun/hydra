@@ -10,10 +10,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:aegis/screens/configuration/advanced_config_screen.dart';
-import 'package:aegis/providers/scan_config_provider.dart';
-import 'package:aegis/providers/plugins_provider.dart';
-import 'package:aegis/models/plugin.dart';
+import 'package:hydra/screens/configuration/advanced_config_screen.dart';
+import 'package:hydra/providers/scan_config_provider.dart';
+import 'package:hydra/providers/plugins_provider.dart';
+import 'package:hydra/models/plugin.dart';
 
 import 'helpers/pump_app.dart';
 

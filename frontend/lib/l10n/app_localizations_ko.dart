@@ -9,7 +9,7 @@ class AppLocalizationsKo extends AppLocalizations {
   AppLocalizationsKo([String locale = 'ko']) : super(locale);
 
   @override
-  String get appName => 'Aegis';
+  String get appName => 'Hydra';
 
   @override
   String get appDescription => 'LLM 취약점 스캐너';

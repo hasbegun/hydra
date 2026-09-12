@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:aegis/l10n/app_localizations.dart';
+import 'package:hydra/l10n/app_localizations.dart';
 import '../../config/constants.dart';
 import '../../models/scan_status.dart';
 import '../../services/export_service.dart';

@@ -1,6 +1,6 @@
-# Aegis User Guide
+# Hydra User Guide
 
-Aegis is a cross-platform desktop GUI for [Garak](https://github.com/leondz/garak), NVIDIA's LLM vulnerability scanner. It lets you test language models for security vulnerabilities -- jailbreaks, prompt injection, toxicity, data leakage, and other OWASP LLM Top 10 risks -- without needing command-line expertise.
+Hydra is a cross-platform desktop GUI for [Garak](https://github.com/leondz/garak), NVIDIA's LLM vulnerability scanner. It lets you test language models for security vulnerabilities -- jailbreaks, prompt injection, toxicity, data leakage, and other OWASP LLM Top 10 risks -- without needing command-line expertise.
 
 This guide walks you through installation, configuration, and day-to-day usage.
 
@@ -27,7 +27,7 @@ This guide walks you through installation, configuration, and day-to-day usage.
 
 ## Prerequisites
 
-Before installing Aegis, make sure you have:
+Before installing Hydra, make sure you have:
 
 - **Python 3.8+** -- required for the backend and Garak
 - **Flutter 3.9+** -- required to build the frontend
@@ -151,7 +151,7 @@ Click **New Scan** on the home screen. You will see the model selection screen.
 2. Select a **model** from the list (e.g., `gpt-3.5-turbo`, `llama3`)
 3. Enter your **API key** if required (keys are stored securely on your device)
 
-Aegis validates your API key before proceeding. If validation fails, check that the key is correct and the provider service is reachable.
+Hydra validates your API key before proceeding. If validation fails, check that the key is correct and the provider service is reachable.
 
 ![Model Selection](../screenshots/scan1.png)
 
@@ -190,7 +190,7 @@ Click **Start Scan** (or press `Ctrl+Enter` / `Cmd+Enter`). The scan begins imme
 
 ## Monitoring Scan Progress
 
-Once a scan starts, Aegis shows real-time progress via WebSocket:
+Once a scan starts, Hydra shows real-time progress via WebSocket:
 
 - **Progress bar** -- overall completion percentage
 - **Current probe** -- the probe currently being tested
@@ -279,7 +279,7 @@ Switch between **Light** and **Dark** mode.
 
 ### Language
 
-Aegis supports multiple languages:
+Hydra supports multiple languages:
 
 - English
 - Korean
@@ -318,7 +318,7 @@ Shortcut hints appear in button tooltips throughout the UI.
 
 ## API Keys & Providers
 
-Aegis supports 15+ LLM providers. Here is how to set up the most common ones:
+Hydra supports 15+ LLM providers. Here is how to set up the most common ones:
 
 ### OpenAI
 
@@ -374,9 +374,9 @@ docker-compose down
 Or use the Makefile shortcuts:
 
 ```bash
-make aegis-up       # Start
-make aegis-logs     # View logs
-make aegis-down     # Stop
+make hydra-up       # Start
+make hydra-logs     # View logs
+make hydra-down     # Stop
 ```
 
 ### Production Configuration

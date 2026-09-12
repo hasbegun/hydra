@@ -1,11 +1,11 @@
-# Aegis
+# Hydra
 
-A modern cross platform GUI for [Garak](https://github.com/leondz/garak), NVIDIA's LLM vulnerability scanner. Aegis provides an intuitive interface to scan language models for security vulnerabilities including jailbreaks, prompt injection, toxicity, and more.
+A modern cross platform GUI for [Garak](https://github.com/leondz/garak), NVIDIA's LLM vulnerability scanner. Hydra provides an intuitive interface to scan language models for security vulnerabilities including jailbreaks, prompt injection, toxicity, and more.
 
 ## Project Structure
 
 ```
-aegis/
+hydra/
 ├── backend/          # FastAPI backend service
 │   ├── api/          # API routes
 │   ├── models/       # Data models
@@ -154,7 +154,7 @@ Once the backend is running, visit:
 
 ## Keyboard Shortcuts
 
-Aegis supports keyboard shortcuts for common actions. On macOS, use `⌘` (Command); on Windows/Linux, use `Ctrl`.
+Hydra supports keyboard shortcuts for common actions. On macOS, use `⌘` (Command); on Windows/Linux, use `Ctrl`.
 
 | Shortcut | Action | Available On |
 |----------|--------|--------------|

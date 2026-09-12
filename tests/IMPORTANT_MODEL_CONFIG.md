@@ -6,7 +6,7 @@
 
 ### The Problem
 
-The aegis backend currently expects standard LLM provider configurations (OpenAI, HuggingFace, Anthropic), but we're trying to test:
+The hydra backend currently expects standard LLM provider configurations (OpenAI, HuggingFace, Anthropic), but we're trying to test:
 - **Target:** Open WebUI (localhost:3030)
 - **Backend:** Ollama
 - **Model:** mistral:latest
@@ -44,7 +44,7 @@ def get_scan_config(probes: list, generations: int = None) -> Dict[str, Any]:
 
 ### Option 2: Use Garak CLI Directly
 
-Bypass the aegis backend and use Garak CLI with the original REST configuration:
+Bypass the hydra backend and use Garak CLI with the original REST configuration:
 
 ```bash
 cd /Users/innox/projects/garak
@@ -62,7 +62,7 @@ python -m garak \
 
 ### Option 3: Update Backend to Support REST
 
-Modify the aegis backend `/models/schemas.py` to add REST as a generator type:
+Modify the hydra backend `/models/schemas.py` to add REST as a generator type:
 
 ```python
 class GeneratorType(str, Enum):

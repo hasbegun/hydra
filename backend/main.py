@@ -124,7 +124,7 @@ app.include_router(models.router, prefix="/api/v1/generators", tags=["Models"])
 async def root():
     """Root endpoint - API health check"""
     return {
-        "name": "Aegis Backend API",
+        "name": "Hydra Backend API",
         "version": "1.0.0",
         "status": "running",
         "docs": "/api/docs"

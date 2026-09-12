@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Master Test Runner
-Executes all LLM security test sections using aegis backend
+Executes all LLM security test sections using hydra backend
 """
 
 import sys
@@ -26,7 +26,7 @@ def print_banner():
     print(f"{BOLD}  AEGIS SECURITY - LLM VULNERABILITY TEST SUITE{RESET}")
     print("=" * 70)
     print(f"\nTarget:    Open WebUI (localhost:3030)")
-    print(f"Backend:   Aegis API (localhost:8888)")
+    print(f"Backend:   Hydra API (localhost:8888)")
     print(f"Framework: Garak LLM Scanner")
     print(f"Date:      {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("\n" + "=" * 70)

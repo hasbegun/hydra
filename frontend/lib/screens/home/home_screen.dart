@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:aegis/l10n/app_localizations.dart';
+import 'package:hydra/l10n/app_localizations.dart';
 import '../../config/constants.dart';
 import '../../utils/keyboard_shortcuts.dart';
 import '../../widgets/background_scans_indicator.dart';

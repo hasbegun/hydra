@@ -1,7 +1,7 @@
 {
   "@@locale": "en",
 
-  "appName": "Aegis",
+  "appName": "Hydra",
   "appDescription": "LLM Vulnerability Scanner",
   "appVersion": "1.0.0",
 

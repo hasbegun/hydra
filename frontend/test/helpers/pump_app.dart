@@ -5,9 +5,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:aegis/l10n/app_localizations.dart';
-import 'package:aegis/services/api_service.dart';
-import 'package:aegis/models/plugin.dart';
+import 'package:hydra/l10n/app_localizations.dart';
+import 'package:hydra/services/api_service.dart';
+import 'package:hydra/models/plugin.dart';
 
 /// Wraps a widget with MaterialApp + localization + ProviderScope for testing.
 Widget buildTestApp({

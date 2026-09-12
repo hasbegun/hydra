@@ -1,6 +1,6 @@
 # Docker Compose Development Override
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-# Or simply: make aegis-dev
+# Or simply: make hydra-dev
 
 services:
   postgres:
@@ -40,12 +40,12 @@ services:
       LOG_LEVEL: DEBUG
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-aegis}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aegis}"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-hydra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hydra}"
       STORAGE_BACKEND: "${STORAGE_BACKEND:-minio}"
       MINIO_ENDPOINT: "minio:9000"
-      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-aegis}"
+      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-hydra}"
       MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD}"
-      MINIO_BUCKET: "${MINIO_BUCKET:-aegis-reports}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-hydra-reports}"
       MINIO_SECURE: "false"
       GARAK_REPORTS_DIR: "/tmp/garak_reports"
       GARAK_SERVICE_URL: "http://garak:9090"

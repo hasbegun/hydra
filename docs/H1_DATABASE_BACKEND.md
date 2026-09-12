@@ -11,7 +11,7 @@
 
 ### Current State: Everything Is Files
 
-Aegis stores all data as flat files on a shared Docker volume:
+Hydra stores all data as flat files on a shared Docker volume:
 
 | Data | Format | Location |
 |------|--------|----------|
@@ -51,7 +51,7 @@ Active scan tracking, workflow graphs, and scan status are in-memory. Container 
 
 ### Why SQL at All? (SQL vs NoSQL)
 
-Aegis data is **relational and structured** — scans have a fixed schema (target, status, timestamps, counts), config templates have a fixed schema, probes have a fixed schema. The primary access patterns are:
+Hydra data is **relational and structured** — scans have a fixed schema (target, status, timestamps, counts), config templates have a fixed schema, probes have a fixed schema. The primary access patterns are:
 
 | Access Pattern | Best Fit |
 |---------------|----------|
@@ -63,9 +63,9 @@ Aegis data is **relational and structured** — scans have a fixed schema (targe
 
 **NoSQL options considered:**
 
-| Option | Pros | Cons for Aegis |
+| Option | Pros | Cons for Hydra |
 |--------|------|----------------|
-| **MongoDB** | Flexible schema, JSON-native | New container + credentials. Overkill — Aegis data is well-structured, not schema-evolving. Aggregation pipelines are harder to write/maintain than SQL. |
+| **MongoDB** | Flexible schema, JSON-native | New container + credentials. Overkill — Hydra data is well-structured, not schema-evolving. Aggregation pipelines are harder to write/maintain than SQL. |
 | **Redis** | Fast key-value, great for caching | Not a primary data store. No complex queries. Already have in-memory caching. |
 | **TinyDB** | Pure Python, JSON-based, zero config | No concurrent access support. No indexing beyond basic. Loads entire DB into memory. Fine for <1K records, breaks at scale. |
 | **LiteDB / UnQLite** | Embedded NoSQL | Poor Python ecosystem. Niche libraries with uncertain maintenance. |
@@ -106,7 +106,7 @@ Aegis data is **relational and structured** — scans have a fixed schema (targe
 - Follows the same principle as Minio — each service is its own container
 
 **Migration effort is minimal** because SQLAlchemy abstracts the dialect. The only changes:
-- Connection string: `sqlite:///path` → `postgresql://user:pass@postgres:5432/aegis`
+- Connection string: `sqlite:///path` → `postgresql://user:pass@postgres:5432/hydra`
 - Remove SQLite-specific pragmas (WAL mode, foreign_keys)
 - Add `psycopg2-binary` to requirements.txt
 - Add PostgreSQL container to docker-compose.yml
@@ -123,7 +123,7 @@ Files (current) → SQL (relational, structured) → PostgreSQL (own container)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                        aegis-network                             │
+│                        hydra-network                             │
 │                                                                  │
 │  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐        │
 │  │   Backend    │   │ Garak Service│   │    Ollama    │        │
@@ -408,7 +408,7 @@ The most interesting question is how the garak service tells the backend "scan c
 ```
 Garak Service ──SSE stream──► Backend
   "status: complete"
-  "report_path: s3://aegis-reports/{scan_id}/report.jsonl"
+  "report_path: s3://hydra-reports/{scan_id}/report.jsonl"
 ```
 - Already implemented and working
 - Garak service emits events as they happen
@@ -438,7 +438,7 @@ Garak Service ──POST /webhook──► Backend
 
 Rationale:
 - SSE is already working and battle-tested in the codebase
-- Aegis is currently single-backend-instance — no fan-out needed
+- Hydra is currently single-backend-instance — no fan-out needed
 - Adding a message queue is justified when we need: multi-instance backend (horizontal scaling), durable event replay, or webhook notifications (H3)
 - The SSE event payload just needs a new field: `"report_key": "s3://..."` — minimal change
 
@@ -451,7 +451,7 @@ VH1:   Redis becomes shared session store for multi-instance auth
 
 #### Docker Networking
 
-All containers communicate over a single bridge network (`aegis-network`). No ports exposed between containers — only through Docker DNS:
+All containers communicate over a single bridge network (`hydra-network`). No ports exposed between containers — only through Docker DNS:
 
 ```yaml
 services:
@@ -480,7 +480,7 @@ No shared volumes between any containers. Each has its own named volume for pers
 
 ```
 ┌─────────────────────────────────────┐
-│            SQLite (aegis.db)        │
+│            SQLite (hydra.db)        │
 │  • Scan metadata (status, times)    │
 │  • Config templates                 │
 │  • Custom probe metadata            │
@@ -517,7 +517,7 @@ No shared volumes between any containers. Each has its own named volume for pers
 │  (port 9000) │
 │              │
 │ Bucket:      │
-│  aegis-reports│
+│  hydra-reports│
 │   ├ {id}/report.jsonl │
 │   ├ {id}/hitlog.jsonl │
 │   └ {id}/report.html  │
@@ -538,15 +538,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-aegis}
-      POSTGRES_USER: ${POSTGRES_USER:-aegis}
+      POSTGRES_DB: ${POSTGRES_DB:-hydra}
+      POSTGRES_USER: ${POSTGRES_USER:-hydra}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pg-data:/var/lib/postgresql/data
     networks:
-      - aegis-network
+      - hydra-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aegis"]
+      test: ["CMD-SHELL", "pg_isready -U hydra"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -558,12 +558,12 @@ services:
     ports:
       - "9001:9001"   # Web console (optional, for debugging)
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-aegis}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-hydra}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - minio-data:/data
     networks:
-      - aegis-network
+      - hydra-network
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
@@ -578,11 +578,11 @@ services:
       minio:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-aegis}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aegis}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hydra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hydra}
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-aegis}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-hydra}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET: aegis-reports
+      MINIO_BUCKET: hydra-reports
       STORAGE_BACKEND: minio   # or "local" for dev without Minio
 
   garak:
@@ -591,9 +591,9 @@ services:
         condition: service_healthy
     environment:
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-aegis}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-hydra}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET: aegis-reports
+      MINIO_BUCKET: hydra-reports
 
 volumes:
   pg-data:       # PostgreSQL data (persistent)
@@ -608,7 +608,7 @@ volumes:
 - Add `minio` Python package to requirements.txt
 - Add Minio container to docker-compose.yml
 - Create `backend/services/object_store.py` — S3 client wrapper
-- Auto-create `aegis-reports` bucket on startup
+- Auto-create `hydra-reports` bucket on startup
 - Config: `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`
 
 #### Phase B: Garak Service Upload
@@ -740,7 +740,7 @@ Both backend and garak service containers need these credentials to talk to Mini
 
 **Further hardening:**
 - Create a dedicated service account with limited permissions (not root)
-- Bucket policy: `aegis-reports` bucket is private, no public access
+- Bucket policy: `hydra-reports` bucket is private, no public access
 - TLS between containers (Minio supports `--certs-dir`)
 - In production: use external secret management (Vault, AWS Secrets Manager)
 
@@ -837,7 +837,7 @@ Based on the analysis, phases are reordered to address critical issues first:
 - `STORAGE_BACKEND` env var to switch (`local` for dev without Minio, `minio` for full setup)
 - Add Minio container to docker-compose.yml with health check
 - Add `minio` Python package to requirements.txt
-- Auto-create `aegis-reports` bucket on startup
+- Auto-create `hydra-reports` bucket on startup
 
 #### Phase B: Garak Service — Local Rename + Upload
 - Garak service keeps local temp volume for garak CLI output
@@ -947,7 +947,7 @@ Migrated from embedded SQLite + shared Docker volume to PostgreSQL (own containe
 - `STORAGE_BACKEND` env var selects backend (`local` or `minio`)
 - Singleton pattern: `init_object_store()` at startup, `get_object_store()` for access
 - Added `minio/minio:latest` container to `docker-compose.yml` with health check
-- Auto-creates `aegis-reports` bucket on startup
+- Auto-creates `hydra-reports` bucket on startup
 - Added `minio>=7.0` to `requirements.txt`
 
 ### Phase B: Garak Service — Local Rename + Upload to Minio

@@ -1,5 +1,5 @@
 """
-Aegis Test Suite
+Hydra Test Suite
 Modular LLM security testing using the Garak backend API
 """
 

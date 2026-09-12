@@ -1,6 +1,6 @@
 /// Tests for AttemptCard sanitization of control characters in model outputs.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:aegis/widgets/attempt_card.dart';
+import 'package:hydra/widgets/attempt_card.dart';
 
 import 'package:flutter/material.dart';
 

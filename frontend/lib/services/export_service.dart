@@ -116,7 +116,7 @@ class ExportService {
       await Share.shareXFiles(
         [XFile(filePath)],
         subject: 'Garak Scan Configuration',
-        text: 'Scan configuration exported from Aegis',
+        text: 'Scan configuration exported from Hydra',
       );
     } catch (e) {
       throw Exception('Failed to share config: $e');
@@ -135,7 +135,7 @@ class ExportService {
         'export_info': {
           'exported_at': DateTime.now().toIso8601String(),
           'total_scans': resultsList.length,
-          'exported_by': 'Aegis - Garak UI',
+          'exported_by': 'Hydra - Garak UI',
         },
         'scans': resultsList,
       };

@@ -8,8 +8,8 @@
 /// - Action buttons (export, back to home)
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:aegis/screens/results/results_screen.dart';
-import 'package:aegis/models/scan_status.dart';
+import 'package:hydra/screens/results/results_screen.dart';
+import 'package:hydra/models/scan_status.dart';
 
 import 'helpers/pump_app.dart';
 

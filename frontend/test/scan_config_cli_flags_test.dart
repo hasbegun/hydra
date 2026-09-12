@@ -6,8 +6,8 @@
 /// - ScanConfig model: serialization, defaults, copyWith
 /// - ScanConfigNotifier: setConfigFile, setReportThreshold, setHitRate, setCollectTiming
 import 'package:flutter_test/flutter_test.dart';
-import 'package:aegis/models/scan_config.dart';
-import 'package:aegis/providers/scan_config_provider.dart';
+import 'package:hydra/models/scan_config.dart';
+import 'package:hydra/providers/scan_config_provider.dart';
 
 void main() {
   // -----------------------------------------------------------------------

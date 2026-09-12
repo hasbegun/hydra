@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:aegis/l10n/app_localizations.dart';
+import 'package:hydra/l10n/app_localizations.dart';
 
 /// UI helper utilities for better error messages, animations, and transitions
 class UIHelpers {

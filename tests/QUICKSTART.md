@@ -5,7 +5,7 @@ Get started testing in under 5 minutes.
 ## Prerequisites Check
 
 ```bash
-# 1. Check Aegis backend is running
+# 1. Check Hydra backend is running
 curl http://localhost:8888/health
 # Expected: {"status":"healthy"}
 
@@ -18,7 +18,7 @@ curl -H "Authorization: Bearer sk-15bdf48030cd4a7e8ee6d98e2ff3faa2" \
 ## Install Dependencies
 
 ```bash
-cd /Users/innox/projects/garak/aegis/tests
+cd /Users/innox/projects/garak/hydra/tests
 pip install -r requirements.txt
 ```
 
@@ -121,7 +121,7 @@ open http://localhost:8888/api/docs
 lsof -i :8888
 
 # Start backend
-cd /Users/innox/projects/garak/aegis/backend
+cd /Users/innox/projects/garak/hydra/backend
 python main.py
 ```
 

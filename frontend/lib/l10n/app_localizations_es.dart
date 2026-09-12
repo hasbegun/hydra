@@ -9,7 +9,7 @@ class AppLocalizationsEs extends AppLocalizations {
   AppLocalizationsEs([String locale = 'es']) : super(locale);
 
   @override
-  String get appName => 'Aegis';
+  String get appName => 'Hydra';
 
   @override
   String get appDescription => 'Escáner de Vulnerabilidades LLM';
