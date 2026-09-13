@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from hydra_scan import (
     build_parser, cmd_validate, cmd_init, _dry_run, _extract_counts,
-    _save_reports, HydraClient,
+    _save_reports, _sanitize_filename, HydraClient,
 )
 
 
@@ -815,3 +815,60 @@ targets:
         assert "model-b" in out
         assert "rest-api" in out
         assert "3" in out  # 3 targets
+
+
+# ---------------------------------------------------------------------------
+# Filename sanitization (security)
+# ---------------------------------------------------------------------------
+
+class TestFilenameSanitization:
+    """Prevent path traversal and special characters in report filenames."""
+
+    def test_path_traversal_slashes(self):
+        assert "/" not in _sanitize_filename("../../etc/passwd")
+        assert "\\" not in _sanitize_filename("..\\..\\windows\\system32")
+
+    def test_normal_names_unchanged(self):
+        assert _sanitize_filename("llama3.2") == "llama3.2"
+        assert _sanitize_filename("qwen2.5-1.5b") == "qwen2.5-1.5b"
+        assert _sanitize_filename("my-model") == "my-model"
+
+    def test_colon_in_model_name(self):
+        """Ollama model names like 'qwen2.5:1.5b' contain colons."""
+        result = _sanitize_filename("qwen2.5:1.5b")
+        assert ":" not in result
+        assert len(result) > 0
+
+    def test_empty_string(self):
+        assert _sanitize_filename("") == "unnamed"
+
+    def test_null_bytes(self):
+        assert "\0" not in _sanitize_filename("model\0name")
+
+    def test_special_characters(self):
+        result = _sanitize_filename('model<>:"|?*name')
+        assert "<" not in result
+        assert ">" not in result
+        assert '"' not in result
+        assert "|" not in result
+        assert "?" not in result
+        assert "*" not in result
+
+    def test_save_reports_uses_sanitized_name(self, tmp_path):
+        """_save_reports uses sanitized filename, not raw target_name."""
+        mock_client = MagicMock()
+        mock_client.scan_results.return_value = {"scan_id": "abc", "status": "ok"}
+
+        output_cfg = {
+            "directory": str(tmp_path),
+            "formats": ["json"],
+            "filename_pattern": "{name}_{date}",
+        }
+        # Malicious target name with path traversal
+        paths = _save_reports(mock_client, "scan-123", "../../etc/passwd", output_cfg)
+
+        # File should be saved INSIDE tmp_path, not outside
+        json_path = Path(paths["json"])
+        assert json_path.parent == tmp_path
+        assert "/" not in json_path.name
+        assert ".." not in json_path.name

@@ -31,14 +31,14 @@ Add a Dockerized Python CLI tool with YAML-based scan plans, automated schedulin
 | T1: Backend REST fields | 27 tests | PASS | `test_rest_target.py` — schema, command builder, generator_options mapping |
 | T2: Plan Loader | 35 tests | PASS | `test_plan_loader.py` — load, validate, merge, env vars, generator_options, body_template strip |
 | T3: Comparator | 20 tests | PASS | `test_comparator.py` — find, compare, threshold, print |
-| T4: CLI (offline) | 47 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help, defaults, overrides, exit codes, quiet/JSON, error handling, report saving |
+| T4: CLI (offline) | 54 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help, defaults, overrides, exit codes, quiet/JSON, error handling, report saving, filename sanitization |
 | T4: CLI (Docker integration) | 7 verified | PASS | --help, health, dry-run, validate, init, env vars, probes |
 | T4: CLI (E2E with Ollama) | 4 verified | PASS | T4.1 plan scan, T4.7 ad-hoc scan, T4.9 comparison, T5.3 Docker scan |
 | T4.2: Multi-target E2E | verified | PASS | 2 models (qwen2.5:1.5b, phi3:mini), sequential scan, separate reports |
 | T4.8: REST endpoint E2E | verified | PASS | Ollama OpenAI-compatible API via REST generator with JSONPath |
 | T5: Docker CLI | 3 verified | PASS | T5.1 --help, T5.2 health, T5.4 not in default compose |
-| T6: Regression | verified | PASS | 254 backend + 102 CLI tests pass (1 pre-existing failure unrelated) |
-| **Total** | **129 automated + 16 manual** | **ALL PASS** | 0 regressions |
+| T6: Regression | verified | PASS | 254 backend + 109 CLI tests pass (1 pre-existing failure unrelated) |
+| **Total** | **136 automated + 16 manual** | **ALL PASS** | 0 regressions |
 
 ### Phase 3 Bug Fixes (found during E2E testing)
 
@@ -67,6 +67,14 @@ Added 26 new automated tests covering previously untested success criteria:
 - **S19** (error handling): Connection refused produces human-readable error; invalid JSON headers detected; failed scan status exits non-zero; no raw tracebacks
 - **_extract_counts**: Unit tests for all backend response format variants (nested, top-level, empty, null)
 - **S4** (multi-target dry run): 3-target plan renders all targets in dry run
+
+### Phase 6: Security Audit & Hardening
+
+Full code audit of all CLI modules, backend changes, Docker config:
+- **Path traversal fix**: Added `_sanitize_filename()` in `hydra_scan.py` — strips path separators (`/`, `\`), null bytes, and special characters (`<>:"|?*`) from target names before using them in report filenames. Prevents writing files outside the intended output directory.
+- **Redundant imports cleanup**: Removed `from pathlib import Path as P` and `import re` inside `cmd_compare` (both already available at module level).
+- **Security audit passed**: `yaml.safe_load` used (no arbitrary code execution), no secrets in code, explicit file encoding, env vars resolved at runtime not stored in YAML.
+- 7 new tests for filename sanitization covering path traversal, special characters, empty strings, null bytes, and end-to-end report saving with malicious names.
 
 ### Remaining
 
@@ -1155,7 +1163,7 @@ PyYAML>=6.0,<7.0
 | `backend/tests/test_rest_target.py` | Backend REST field tests | 417 |
 | `cli/tests/test_plan_loader.py` | Plan loader tests | 499 |
 | `cli/tests/test_comparator.py` | Comparator tests | 330 |
-| `cli/tests/test_hydra_scan.py` | CLI tool tests | 251 |
+| `cli/tests/test_hydra_scan.py` | CLI tool tests | 874 |
 
 ### Modified Files (5) [ALL DONE]
 

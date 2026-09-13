@@ -16,6 +16,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -249,6 +250,21 @@ def _monitor_rest(client: HydraClient, scan_id: str, quiet: bool = False) -> dic
 # Report saving
 # ---------------------------------------------------------------------------
 
+def _sanitize_filename(name: str) -> str:
+    """Sanitize a string for safe use in filenames.
+
+    Removes path separators and other characters that could escape the
+    output directory or cause filesystem issues.
+    """
+    # Replace path separators and null bytes
+    safe = name.replace("/", "_").replace("\\", "_").replace("\0", "")
+    # Replace other problematic characters
+    safe = re.sub(r'[<>:"|?*]', "_", safe)
+    # Collapse runs of underscores
+    safe = re.sub(r"_+", "_", safe).strip("_.")
+    return safe or "unnamed"
+
+
 def _save_reports(
     client: HydraClient,
     scan_id: str,
@@ -262,8 +278,9 @@ def _save_reports(
     formats = output_cfg.get("formats", ["json", "html"])
     now = datetime.datetime.now()
 
+    safe_name = _sanitize_filename(target_name)
     basename = pattern.format(
-        name=target_name,
+        name=safe_name,
         date=now.strftime(ts_fmt),
         time=now.strftime("%H%M%S"),
         plan="",
@@ -718,12 +735,10 @@ def cmd_compare(args: argparse.Namespace) -> int:
     target_name = args.target
 
     # Find the two most recent results
-    from pathlib import Path as P
-    base = P(baseline_dir)
+    base = Path(baseline_dir)
     if not base.is_dir():
         _error(f"Directory not found: {baseline_dir}")
 
-    import re
     candidates = sorted(
         [f for f in base.glob("*.json") if re.search(re.escape(target_name), f.stem)],
         key=lambda p: p.stat().st_mtime,
