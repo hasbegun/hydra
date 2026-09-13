@@ -31,14 +31,14 @@ Add a Dockerized Python CLI tool with YAML-based scan plans, automated schedulin
 | T1: Backend REST fields | 27 tests | PASS | `test_rest_target.py` — schema, command builder, generator_options mapping |
 | T2: Plan Loader | 35 tests | PASS | `test_plan_loader.py` — load, validate, merge, env vars, generator_options, body_template strip |
 | T3: Comparator | 30 tests | PASS | `test_comparator.py` — find, compare, threshold, print, extract_counts, date extraction |
-| T4: CLI (offline) | 73 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help, defaults, overrides, exit codes, quiet/JSON, error handling, report saving, filename sanitization, progress bar, plan loading, print summary, compare, preset override |
+| T4: CLI (offline) | 81 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help, defaults, overrides, exit codes, quiet/JSON, error handling, report saving, filename sanitization, progress bar, plan loading, print summary, compare, preset override, full cmd_run/cmd_scan flow |
 | T4: CLI (Docker integration) | 7 verified | PASS | --help, health, dry-run, validate, init, env vars, probes |
 | T4: CLI (E2E with Ollama) | 4 verified | PASS | T4.1 plan scan, T4.7 ad-hoc scan, T4.9 comparison, T5.3 Docker scan |
 | T4.2: Multi-target E2E | verified | PASS | 2 models (qwen2.5:1.5b, phi3:mini), sequential scan, separate reports |
 | T4.8: REST endpoint E2E | verified | PASS | Ollama OpenAI-compatible API via REST generator with JSONPath |
 | T5: Docker CLI | 3 verified | PASS | T5.1 --help, T5.2 health, T5.4 not in default compose |
-| T6: Regression | verified | PASS | 254 backend + 138 CLI tests pass (1 pre-existing failure unrelated) |
-| **Total** | **165 automated + 16 manual** | **ALL PASS** | 0 regressions |
+| T6: Regression | verified | PASS | 254 backend + 146 CLI tests pass (1 pre-existing failure unrelated) |
+| **Total** | **173 automated + 16 manual** | **ALL PASS** | 0 regressions |
 
 ### Phase 3 Bug Fixes (found during E2E testing)
 
@@ -110,6 +110,20 @@ Thorough code audit of every module, focusing on logic correctness, edge cases, 
 - `cmd_scan` preset override logic — argparse defaults are `None` (2 tests)
 - `cmd_compare` — two-file comparison, insufficient files, nonexistent dir, regression detection (4 tests)
 - `_extract_date_from_filename` — standard, middle, mtime fallback (3 tests)
+
+### Phase 10: Integration Flow Tests & Final Coverage
+
+Systematic audit of success criteria S1-S21 identified gaps in full-flow testing — previous tests exercised individual functions and exit codes but not the complete `cmd_run`/`cmd_scan` pipeline end-to-end. Added 8 new integration-style unit tests using mocked backends to verify:
+
+- **S2 (cmd_run full flow)**: Plan scan saves reports to disk, prints summary with correct pass/fail counts, returns correct exit code based on policy. Verifies actual file creation (not mocked `_save_reports`).
+- **S11 (comparison during cmd_run)**: Plan scan with `compare.enabled: true` attempts comparison against previous results in the output directory.
+- **S18 (cmd_scan full flow)**: Ad-hoc scan produces summary output, saves reports, and passes correct config (model, probes, generations) to the backend.
+- **S3 (REST ad-hoc)**: REST scan passes all REST fields (endpoint, body_template, response_field, headers) correctly to the backend.
+- **S18 preset integration**: Preset fills in `generations` when not explicitly set; explicit `--generations` overrides preset value. Tests the Phase 8 bug fix end-to-end.
+- **Multi-target resilience**: `cmd_run` continues to the next target when one fails, logging the failure to stderr.
+- **S13 multi-target JSON**: `json_stdout` with 2 targets produces JSON containing both target results.
+
+Also improved `_make_mock_client` helper to return proper `bytes` from `scan_report_html` so real `_save_reports` calls work in tests.
 
 ### Remaining
 
@@ -1198,7 +1212,7 @@ PyYAML>=6.0,<7.0
 | `backend/tests/test_rest_target.py` | Backend REST field tests | 417 |
 | `cli/tests/test_plan_loader.py` | Plan loader tests | 499 |
 | `cli/tests/test_comparator.py` | Comparator + extract_counts tests | 412 |
-| `cli/tests/test_hydra_scan.py` | CLI tool tests | 1118 |
+| `cli/tests/test_hydra_scan.py` | CLI tool tests | 1398 |
 
 ### Modified Files (5) [ALL DONE]
 

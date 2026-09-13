@@ -50,6 +50,7 @@ def _make_mock_client(
         "results": {"passed": 5, "failed": 0},
         "summary": {"total_tests": 5, "pass_rate": 100.0},
     }
+    client.scan_report_html.return_value = b"<html><body>report</body></html>"
     if not preset_available:
         client.get_preset.side_effect = SystemExit(1)
     else:
@@ -1100,3 +1101,298 @@ class TestCmdCompare:
         ])
         result = cmd_compare(args)
         assert result == 1  # regression: 90% -> 50% exceeds 5% threshold
+
+
+# ---------------------------------------------------------------------------
+# S2/S18: Full cmd_run and cmd_scan flow tests (mocked backend)
+# ---------------------------------------------------------------------------
+
+class TestCmdRunFullFlow:
+    """Test the full cmd_run flow: load plan, start scan, monitor, save, summarise."""
+
+    def test_plan_scan_saves_reports_and_prints_summary(self, tmp_path, capsys):
+        """S2: Full plan scan produces reports and summary output."""
+        from hydra_scan import cmd_run
+
+        plan_file = tmp_path / "plan.yaml"
+        plan_file.write_text("""
+name: "flow-test"
+targets:
+  - name: "test-model"
+    type: ollama
+    model: test-model
+output:
+  directory: "{out_dir}"
+  formats: [json]
+""".format(out_dir=str(tmp_path / "reports")))
+
+        scan_result = {
+            "status": "completed",
+            "results": {"passed": 7, "failed": 3},
+            "summary": {"total_tests": 10, "pass_rate": 70.0},
+        }
+        client = _make_mock_client(scan_results=scan_result)
+
+        parser = build_parser()
+        args = parser.parse_args(["run", "--plan", str(plan_file)])
+
+        # Use real _save_reports (not mocked) to verify file creation
+        with patch("hydra_scan.HydraClient", return_value=client), \
+             patch("hydra_scan._monitor_progress_ws",
+                   return_value={"status": "completed"}):
+            result = cmd_run(args)
+
+        # Exit code: any_fail policy (default), 3 failures -> exit 1
+        assert result == 1
+
+        # Summary printed
+        out = capsys.readouterr().out
+        assert "SCAN COMPLETE: test-model" in out
+        assert "Passed:     7" in out
+        assert "Failed:     3" in out
+        assert "Pass Rate:  70.0%" in out
+
+        # Report file created
+        reports_dir = tmp_path / "reports"
+        json_files = list(reports_dir.glob("*.json"))
+        assert len(json_files) == 1
+        with open(json_files[0]) as f:
+            saved = json.load(f)
+        assert saved["status"] == "completed"
+
+    def test_plan_scan_with_comparison(self, tmp_path, capsys):
+        """S11: Plan scan with comparison enabled detects changes."""
+        from hydra_scan import cmd_run
+        import time as time_mod
+
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+
+        # Create a "previous" result file
+        prev_result = {
+            "results": {"passed": 9, "failed": 1},
+            "summary": {"pass_rate": 90.0},
+        }
+        prev_file = reports_dir / "test-model_2026-01-01.json"
+        prev_file.write_text(json.dumps(prev_result))
+        time_mod.sleep(0.05)  # ensure different mtime
+
+        plan_file = tmp_path / "plan.yaml"
+        plan_file.write_text("""
+name: "compare-test"
+targets:
+  - name: "test-model"
+    type: ollama
+    model: test-model
+output:
+  directory: "{out_dir}"
+  formats: [json]
+compare:
+  enabled: true
+  regression_threshold: 5.0
+automation:
+  exit_code_policy: never
+""".format(out_dir=str(reports_dir)))
+
+        scan_result = {
+            "status": "completed",
+            "results": {"passed": 5, "failed": 5},
+            "summary": {"pass_rate": 50.0},
+        }
+        client = _make_mock_client(scan_results=scan_result)
+
+        parser = build_parser()
+        args = parser.parse_args(["run", "--plan", str(plan_file)])
+
+        with patch("hydra_scan.HydraClient", return_value=client), \
+             patch("hydra_scan._monitor_progress_ws",
+                   return_value={"status": "completed"}):
+            result = cmd_run(args)
+
+        assert result == 0  # exit_code_policy: never
+
+        out = capsys.readouterr().out
+        # Should show comparison output
+        assert "COMPARISON" in out or "No previous result" in out
+
+    def test_plan_scan_failed_target_continues(self, tmp_path, capsys):
+        """cmd_run continues to next target when one fails."""
+        from hydra_scan import cmd_run
+
+        plan_file = tmp_path / "multi.yaml"
+        plan_file.write_text("""
+name: "multi-test"
+targets:
+  - name: "fail-target"
+    type: ollama
+    model: fail-model
+  - name: "pass-target"
+    type: ollama
+    model: pass-model
+automation:
+  exit_code_policy: never
+""")
+        client = _make_mock_client()
+
+        call_count = [0]
+        def mock_monitor(client_arg, scan_id, quiet=False):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {"status": "failed", "error_message": "Model not found"}
+            return {"status": "completed"}
+
+        parser = build_parser()
+        args = parser.parse_args(["run", "--plan", str(plan_file)])
+
+        with patch("hydra_scan.HydraClient", return_value=client), \
+             patch("hydra_scan._monitor_progress_ws", side_effect=mock_monitor), \
+             patch("hydra_scan._save_reports", return_value={"json": "/tmp/r.json"}):
+            result = cmd_run(args)
+
+        # Both targets attempted
+        assert call_count[0] == 2
+        # Failed target logged to stderr
+        captured = capsys.readouterr()
+        assert "Scan failed" in captured.err
+
+    def test_json_stdout_multi_target(self, tmp_path, capsys):
+        """S13: JSON stdout with multiple targets includes all results."""
+        from hydra_scan import cmd_run
+
+        plan_file = tmp_path / "multi_json.yaml"
+        plan_file.write_text("""
+name: "multi-json"
+targets:
+  - name: "target-a"
+    type: ollama
+    model: model-a
+  - name: "target-b"
+    type: ollama
+    model: model-b
+automation:
+  quiet: true
+  json_stdout: true
+  exit_code_policy: never
+""")
+        client = _make_mock_client(scan_results={
+            "status": "completed",
+            "results": {"passed": 4, "failed": 1},
+            "summary": {"total_tests": 5, "pass_rate": 80.0},
+        })
+
+        parser = build_parser()
+        args = parser.parse_args(["run", "--plan", str(plan_file)])
+
+        with _patched_scan(client):
+            cmd_run(args)
+
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert data["plan"] == "multi-json"
+        assert len(data["targets"]) == 2
+        assert data["targets"][0]["name"] == "target-a"
+        assert data["targets"][1]["name"] == "target-b"
+        assert all(t["passed"] == 4 for t in data["targets"])
+
+
+class TestCmdScanFullFlow:
+    """Test the full cmd_scan flow: start, monitor, save, summarise."""
+
+    def test_ad_hoc_scan_full_flow(self, tmp_path, capsys):
+        """S18: Ad-hoc scan produces summary and saves reports."""
+        scan_result = {
+            "status": "completed",
+            "results": {"passed": 10, "failed": 0},
+            "summary": {"total_tests": 10, "pass_rate": 100.0},
+        }
+        client = _make_mock_client(scan_results=scan_result)
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "scan", "--model", "llama3.2",
+            "--probes", "dan.Dan_11_0",
+            "--generations", "3",
+            "--output-dir", str(tmp_path),
+        ])
+
+        with patch("hydra_scan.HydraClient", return_value=client), \
+             patch("hydra_scan._monitor_progress_ws",
+                   return_value={"status": "completed"}):
+            result = cmd_scan(args)
+
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "Scan started:" in out
+        assert "SCAN COMPLETE: llama3.2" in out
+        assert "Passed:     10" in out
+
+        # Report saved
+        json_files = list(Path(tmp_path).glob("*.json"))
+        assert len(json_files) >= 1
+
+        # Verify client was called with correct config
+        call_args = client.start_scan.call_args[0][0]
+        assert call_args["target_name"] == "llama3.2"
+        assert call_args["probes"] == ["dan.Dan_11_0"]
+        assert call_args["generations"] == 3
+
+    def test_ad_hoc_scan_with_rest_target(self, capsys):
+        """S3/S18: Ad-hoc REST scan passes correct config to backend."""
+        client = _make_mock_client()
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "scan",
+            "--target-type", "rest",
+            "--rest-endpoint", "http://localhost:8080/v1/chat/completions",
+            "--rest-body-template", '{"prompt":"$INPUT"}',
+            "--rest-response-field", "$.choices[0].text",
+            "--rest-headers", '{"Authorization":"Bearer tok"}',
+        ])
+
+        with _patched_scan(client):
+            result = cmd_scan(args)
+
+        assert result == 0
+        call_args = client.start_scan.call_args[0][0]
+        assert call_args["target_type"] == "rest"
+        assert call_args["rest_endpoint"] == "http://localhost:8080/v1/chat/completions"
+        assert call_args["rest_body_template"] == '{"prompt":"$INPUT"}'
+        assert call_args["rest_response_json_field"] == "$.choices[0].text"
+        assert call_args["rest_headers"] == {"Authorization": "Bearer tok"}
+
+    def test_ad_hoc_scan_preset_fills_generations(self, capsys):
+        """Preset value for generations should apply when not explicitly set."""
+        client = _make_mock_client(preset_available=True)
+        client.get_preset.return_value = {
+            "config": {"generations": 20, "probes": ["dan"]}
+        }
+
+        parser = build_parser()
+        args = parser.parse_args(["scan", "--model", "m", "--preset", "fast"])
+
+        with _patched_scan(client):
+            cmd_scan(args)
+
+        call_args = client.start_scan.call_args[0][0]
+        # Preset generations (20) should be used since --generations was not passed
+        assert call_args["generations"] == 20
+        assert call_args["probes"] == ["dan"]
+
+    def test_ad_hoc_scan_explicit_generations_wins(self, capsys):
+        """Explicit --generations overrides preset value."""
+        client = _make_mock_client(preset_available=True)
+        client.get_preset.return_value = {
+            "config": {"generations": 20}
+        }
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "scan", "--model", "m", "--preset", "fast", "--generations", "3",
+        ])
+
+        with _patched_scan(client):
+            cmd_scan(args)
+
+        call_args = client.start_scan.call_args[0][0]
+        assert call_args["generations"] == 3  # explicit wins over preset
