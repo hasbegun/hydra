@@ -7,6 +7,50 @@ created: 2026-09-12T18:41:49Z
 
 Add a Dockerized Python CLI tool with YAML-based scan plans, automated scheduling, result comparison, and support for scanning both local LLMs and website/REST endpoints via the existing backend API.
 
+## Implementation Progress
+
+### Implementation Steps
+
+| Step | Description | Status | Commit |
+|------|-------------|--------|--------|
+| 1 | Add REST fields to `schemas.py` | DONE | `31969f5` |
+| 2 | Pass REST flags in `scan_manager.py` | DONE | `31969f5` |
+| 3 | Create `plan_loader.py` | DONE | `31969f5` |
+| 4 | Create `comparator.py` | DONE | `31969f5` |
+| 5 | Create `hydra_scan.py` | DONE | `31969f5` |
+| 6 | Create `requirements.txt` | DONE | `31969f5` |
+| 7 | Create example scan plans | DONE | `31969f5` |
+| 8 | Create `Dockerfile.cli` | DONE | `31969f5` |
+| 9 | Add CLI service to `docker-compose.yml` | DONE | `31969f5` |
+| 10 | Create CLI `README.md` | DONE | `31969f5` |
+
+### Test Results
+
+| Group | Tests | Status | Details |
+|-------|-------|--------|---------|
+| T1: Backend REST fields | 26 tests | PASS | `test_rest_target.py` — schema, command builder |
+| T2: Plan Loader | 29 tests | PASS | `test_plan_loader.py` — load, validate, merge, env vars |
+| T3: Comparator | 20 tests | PASS | `test_comparator.py` — find, compare, threshold, print |
+| T4: CLI (offline) | 21 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help |
+| T4: CLI (Docker integration) | 7 verified | PASS | --help, health, dry-run, validate, init, env vars, probes |
+| T5: Docker CLI | 3 verified | PASS | T5.1 --help, T5.2 health, T5.4 not in default compose |
+| T6: Regression | verified | PASS | 253 backend tests pass (1 pre-existing failure unrelated) |
+| **Total** | **96 automated + 10 manual** | **ALL PASS** | 0 regressions |
+
+### Remaining (require live Ollama + models)
+
+| ID | Test | Blocker |
+|----|------|---------|
+| T4.1 | `run --plan quick-ollama.yaml` end-to-end | Needs Ollama model pulled |
+| T4.2 | Multi-target plan end-to-end | Needs multiple models |
+| T4.7 | Ad-hoc `scan --model` end-to-end | Needs Ollama model |
+| T4.8 | REST plan scan end-to-end | Needs live REST endpoint |
+| T4.9 | Comparison output with real data | Needs 2 completed scans |
+| T5.3 | Docker CLI full scan | Needs Ollama model |
+| T6.3 | Frontend GUI regression | Needs Flutter app |
+
+---
+
 ## Architecture Overview
 
 ### System Components
@@ -888,21 +932,21 @@ python cli/hydra_scan.py compare --target llama3.2 --dir ./hydra_reports/weekly
 
 ## Implementation Plan (Step by Step)
 
-### Step 1: Backend — Add REST fields to ScanConfigRequest
+### Step 1: Backend — Add REST fields to ScanConfigRequest [DONE]
 
 **File:** `backend/models/schemas.py`
-**Changes:** Add `REST = "rest"` to `GeneratorType` enum. Add 4 optional fields to `ScanConfigRequest` (rest_endpoint, rest_headers, rest_body_template, rest_response_json_field).
-**Lines:** ~12
+**Changes:** Added `REST = "rest"` to `GeneratorType` enum. Added 4 optional fields to `ScanConfigRequest` (rest_endpoint, rest_headers, rest_body_template, rest_response_json_field).
+**Lines changed:** 19
 
-### Step 2: Backend — Pass REST flags in garak command builder
+### Step 2: Backend — Pass REST flags in garak command builder [DONE]
 
 **File:** `backend/services/garak_service/scan_manager.py`
-**Changes:** Add 4 conditionals in `_build_command()` to pass `--rest_*` flags when present.
-**Lines:** ~8
+**Changes:** Added 4 conditionals in `_build_command()` to pass `--rest_*` flags when present.
+**Lines changed:** 13
 
-### Step 3: CLI — Create scan plan parser (`plan_loader.py`)
+### Step 3: CLI — Create scan plan parser (`plan_loader.py`) [DONE]
 
-**File:** `cli/plan_loader.py` (NEW, ~200 lines)
+**File:** `cli/plan_loader.py` (NEW, 342 lines)
 **Content:**
 - `load_plan(path) -> dict` — reads YAML, validates schema, resolves env vars
 - `validate_plan(plan) -> list[str]` — returns validation errors
@@ -910,21 +954,21 @@ python cli/hydra_scan.py compare --target llama3.2 --dir ./hydra_reports/weekly
 - `merge_defaults(target, defaults) -> dict` — merges per-target overrides with global defaults
 - `plan_to_scan_configs(plan) -> list[ScanConfig]` — converts plan targets into API request payloads
 
-### Step 4: CLI — Create result comparator (`comparator.py`)
+### Step 4: CLI — Create result comparator (`comparator.py`) [DONE]
 
-**File:** `cli/comparator.py` (NEW, ~150 lines)
+**File:** `cli/comparator.py` (NEW, 326 lines)
 **Content:**
 - `find_previous_result(target_name, baseline_dir) -> Path|None` — finds most recent matching JSON
 - `compare_results(current, previous) -> ComparisonResult` — computes deltas per-probe and overall
 - `print_comparison(result)` — formatted terminal output
 - `check_regression(result, threshold) -> bool` — returns True if regression exceeds threshold
 
-### Step 5: CLI — Create main CLI script (`hydra_scan.py`)
+### Step 5: CLI — Create main CLI script (`hydra_scan.py`) [DONE]
 
-**File:** `cli/hydra_scan.py` (NEW, ~600 lines)
+**File:** `cli/hydra_scan.py` (NEW, 976 lines)
 **Content:**
 - Argparse setup with subcommands: `run`, `scan`, `validate`, `init`, `compare`, `health`, `probes`, `models`, `history`, `report`, `status`, `start-services`, `stop-services`
-- `HydraClient` class — API client wrapper (same as before)
+- `HydraClient` class — API client wrapper
 - `cmd_run(args)` — load plan, iterate targets, start scans, monitor, save reports, compare
 - `cmd_scan(args)` — ad-hoc single-target scan
 - `cmd_validate(args)` — validate YAML plan
@@ -932,7 +976,7 @@ python cli/hydra_scan.py compare --target llama3.2 --dir ./hydra_reports/weekly
 - `cmd_compare(args)` — manual result comparison
 - All other commands (health, probes, models, etc.)
 
-### Step 6: CLI — Create requirements.txt
+### Step 6: CLI — Create requirements.txt [DONE]
 
 **File:** `cli/requirements.txt` (NEW)
 ```
@@ -941,7 +985,7 @@ websocket-client>=1.5.0,<2.0
 PyYAML>=6.0,<7.0
 ```
 
-### Step 7: CLI — Create example scan plans
+### Step 7: CLI — Create example scan plans [DONE]
 
 **Files (NEW):**
 - `cli/scan_plans/examples/quick-ollama.yaml` — minimal Ollama scan
@@ -949,20 +993,20 @@ PyYAML>=6.0,<7.0
 - `cli/scan_plans/examples/website-scan.yaml` — REST endpoint scan
 - `cli/scan_plans/examples/ci-gate.yaml` — CI pipeline gate scan
 
-### Step 8: Docker — Create CLI Dockerfile
+### Step 8: Docker — Create CLI Dockerfile [DONE]
 
-**File:** `backend/Dockerfile.cli` (NEW, ~10 lines)
+**File:** `backend/Dockerfile.cli` (NEW, 28 lines)
 
-### Step 9: Docker — Add CLI service to docker-compose
+### Step 9: Docker — Add CLI service to docker-compose [DONE]
 
-**File:** `backend/docker-compose.yml`
-**Changes:** Add `cli` service with `profiles: [cli]`, volume mounts for plans + reports.
-**Lines:** ~18
+**File:** `backend/docker-compose.yml` — Added `cli` service with `profiles: [cli]`, volume mounts for plans + reports.
+**File:** `backend/docker-compose.dev.yml` — Added dev overrides (depends_on, volume mounts).
+**Lines changed:** 32
 
-### Step 10: Documentation — Create CLI README
+### Step 10: Documentation — Create CLI README [DONE]
 
-**File:** `cli/README.md` (NEW, ~300 lines)
-**Content:** Full YAML reference, all command examples, setup guide, automation/cron guide, troubleshooting.
+**File:** `cli/README.md` (NEW, 236 lines)
+**Content:** Full YAML reference, all command examples, setup guide, automation/cron guide, testing instructions.
 
 ---
 
@@ -1067,32 +1111,38 @@ PyYAML>=6.0,<7.0
 
 ---
 
-## Files to Create / Modify
+## Files Created / Modified
 
-### New Files (10)
+### New Files (14) [ALL CREATED]
 
-| File | Description | Size |
-|------|-------------|------|
-| `cli/hydra_scan.py` | Main CLI tool | ~600 lines |
-| `cli/plan_loader.py` | YAML plan parser, validator, env var resolver | ~200 lines |
-| `cli/comparator.py` | Result comparison engine | ~150 lines |
-| `cli/requirements.txt` | `requests`, `websocket-client`, `PyYAML` | 3 lines |
-| `cli/README.md` | Full documentation | ~300 lines |
-| `cli/scan_plans/examples/quick-ollama.yaml` | Minimal example | ~10 lines |
-| `cli/scan_plans/examples/weekly-audit.yaml` | Multi-model weekly example | ~40 lines |
-| `cli/scan_plans/examples/website-scan.yaml` | REST endpoint example | ~35 lines |
-| `cli/scan_plans/examples/ci-gate.yaml` | CI pipeline example | ~25 lines |
-| `backend/Dockerfile.cli` | CLI Docker image | ~10 lines |
-
-### Modified Files (3)
-
-| File | What Changes | Lines |
+| File | Description | Lines |
 |------|-------------|-------|
-| `backend/models/schemas.py` | Add `REST` to enum + 4 optional REST fields | ~12 |
-| `backend/services/garak_service/scan_manager.py` | Add 4 conditionals for `--rest_*` flags | ~8 |
-| `backend/docker-compose.yml` | Add `cli` service with plans + reports volumes | ~18 |
+| `cli/hydra_scan.py` | Main CLI tool | 976 |
+| `cli/plan_loader.py` | YAML plan parser, validator, env var resolver | 342 |
+| `cli/comparator.py` | Result comparison engine | 326 |
+| `cli/requirements.txt` | `requests`, `websocket-client`, `PyYAML` | 3 |
+| `cli/README.md` | Full documentation | 236 |
+| `cli/scan_plans/examples/quick-ollama.yaml` | Minimal example | 9 |
+| `cli/scan_plans/examples/weekly-audit.yaml` | Multi-model weekly example | 38 |
+| `cli/scan_plans/examples/website-scan.yaml` | REST endpoint example | 36 |
+| `cli/scan_plans/examples/ci-gate.yaml` | CI pipeline example | 27 |
+| `backend/Dockerfile.cli` | CLI Docker image | 28 |
+| `backend/tests/test_rest_target.py` | Backend REST field tests | 417 |
+| `cli/tests/test_plan_loader.py` | Plan loader tests | 499 |
+| `cli/tests/test_comparator.py` | Comparator tests | 330 |
+| `cli/tests/test_hydra_scan.py` | CLI tool tests | 251 |
 
-**Total existing code changes: ~38 lines across 3 files.**
+### Modified Files (5) [ALL DONE]
+
+| File | What Changed | Lines Added |
+|------|-------------|-------------|
+| `backend/models/schemas.py` | `REST` enum + 4 optional REST fields | +19 |
+| `backend/services/garak_service/scan_manager.py` | 4 conditionals for `--rest_*` flags | +13 |
+| `backend/docker-compose.yml` | `cli` service with plans + reports volumes | +21 |
+| `backend/docker-compose.dev.yml` | Dev mode CLI overrides | +11 |
+| `backend/Makefile` | `test-rest`, `test-cli-tool`, `test-all` targets | +24 |
+
+**Total: 22 files changed, 4730 insertions, 5 deletions.**
 
 ---
 
