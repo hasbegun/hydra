@@ -1,0 +1,43 @@
+backend/tests/test_rest_target.py
+  99dfa3997dfaafb7 7-8,208-220,224,235,237-238,240,243-244,246,249-250,252,255-257,259,266-272,275,284-286,290-304,307,311,322,324-325,327,334-335,337,343-344,346,348-349,393-401,414,422-423
+cli/scan_plans/examples/rest-test.yaml
+  99dfa3997dfaafb7 1-31
+cli/scan_plans/examples/multi-target-test.yaml
+  99dfa3997dfaafb7 1-29
+cli-integrate-plan.md
+  99dfa3997dfaafb7 17,31-32,37-38,40-41,50-58,184,320,471,481,629,671
+cli/tests/test_plan_loader.py
+  99dfa3997dfaafb7 500-612
+backend/services/garak_service/scan_manager.py
+  99dfa3997dfaafb7 308,318-332
+cli/README.md
+  99dfa3997dfaafb7 90
+cli/hydra_scan.py
+  99dfa3997dfaafb7 622-623,682,826-828
+cli/plan_loader.py
+  99dfa3997dfaafb7 308,312-315
+cli/scan_plans/examples/website-scan.yaml
+  99dfa3997dfaafb7 27
+cli/scan_plans/examples/ci-gate.yaml
+  99dfa3997dfaafb7 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "50cb00bb1a565efe96192d8495f4e6105d8b9d5a",
+  "prompts": {
+    "99dfa3997dfaafb7": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "polarized-plane",
+        "model": "unknown"
+      },
+      "human_author": "Inho Choi",
+      "messages": [],
+      "total_additions": 314,
+      "total_deletions": 118,
+      "accepted_lines": 313,
+      "overriden_lines": 0
+    }
+  }
+}
