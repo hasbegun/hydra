@@ -24,7 +24,7 @@ targets:
         "messages": [{"role": "user", "content": "$INPUT"}],
         "stream": false
       }
-    response_field: "choices[0].message.content"
+    response_field: "$.choices[0].message.content"
 
 output:
   directory: "./hydra_reports/website"

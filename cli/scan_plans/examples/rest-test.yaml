@@ -1,0 +1,31 @@
+# REST Endpoint E2E Test Plan
+# Targets Ollama's OpenAI-compatible API as a REST endpoint.
+# Usage: hydra_scan.py run --plan scan_plans/examples/rest-test.yaml
+
+name: "rest-test"
+description: "REST endpoint E2E verification via Ollama OpenAI-compatible API"
+
+defaults:
+  generations: 1
+
+targets:
+  - name: "ollama-rest-api"
+    type: rest
+    endpoint: "http://host.docker.internal:11434/v1/chat/completions"
+    headers:
+      Content-Type: "application/json"
+    body_template: |
+      {"model":"qwen2.5:1.5b","messages":[{"role":"user","content":"$INPUT"}],"stream":false}
+    response_field: "$.choices[0].message.content"
+    generator_options:
+      rest:
+        request_timeout: 120
+    probes:
+      - dan.Dan_11_0
+
+output:
+  directory: "/reports"
+  filename_pattern: "{name}_{date}"
+
+automation:
+  exit_code_policy: never

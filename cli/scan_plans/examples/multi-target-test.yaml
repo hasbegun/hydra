@@ -1,0 +1,29 @@
+# Multi-Target E2E Test Plan
+# Scans two models with 1 generation each for fast verification.
+# Usage: hydra_scan.py run --plan scan_plans/examples/multi-target-test.yaml
+
+name: "multi-target-test"
+description: "Multi-target E2E verification with two Ollama models"
+
+defaults:
+  generations: 1
+
+targets:
+  - name: "qwen2.5-1.5b"
+    type: ollama
+    model: qwen2.5:1.5b
+    probes:
+      - dan.Dan_11_0
+
+  - name: "phi3-mini"
+    type: ollama
+    model: phi3:mini
+    probes:
+      - dan.Dan_11_0
+
+output:
+  directory: "/reports"
+  filename_pattern: "{name}_{date}"
+
+automation:
+  exit_code_policy: never

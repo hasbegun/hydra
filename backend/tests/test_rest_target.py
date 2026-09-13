@@ -4,8 +4,8 @@ Tests for REST target support in ScanConfigRequest schema and ScanManager._build
 Covers:
   T1.1 - Schema accepts REST fields
   T1.2 - REST fields are optional (Ollama config validates, REST fields are None)
-  T1.3 - _build_command includes REST flags when present
-  T1.4 - _build_command omits REST flags when absent
+  T1.3 - _build_command passes REST config via --generator_options for rest targets
+  T1.4 - _build_command omits REST generator_options when absent or for non-rest targets
   T1.5 - Existing tests still pass (run separately via make test-local)
 """
 import json
@@ -205,11 +205,23 @@ class TestGeneratorTypeRest:
 
 
 # ---------------------------------------------------------------------------
-# T1.3: _build_command includes REST flags when present
+# Helper: extract generator_options from command list
+# ---------------------------------------------------------------------------
+
+def _parse_generator_options(cmd: list[str]) -> dict:
+    """Extract and parse the --generator_options JSON from a command list."""
+    if "--generator_options" not in cmd:
+        return {}
+    idx = cmd.index("--generator_options")
+    return json.loads(cmd[idx + 1])
+
+
+# ---------------------------------------------------------------------------
+# T1.3: _build_command passes REST config via --generator_options
 # ---------------------------------------------------------------------------
 
 class TestBuildCommandRestFlags:
-    """T1.3: _build_command includes all --rest_* flags with correct values."""
+    """T1.3: _build_command passes REST config through --generator_options."""
 
     def _build(self, config_overrides: dict) -> list[str]:
         from scan_manager import ScanManager
@@ -220,57 +232,47 @@ class TestBuildCommandRestFlags:
         base.update(config_overrides)
         return mgr._build_command(base)
 
-    def test_rest_endpoint_present(self):
+    def test_rest_endpoint_mapped_to_uri(self):
         cmd = self._build({"rest_endpoint": "https://api.example.com/chat"})
-        idx = cmd.index("--rest_endpoint")
-        assert cmd[idx + 1] == "https://api.example.com/chat"
+        opts = _parse_generator_options(cmd)
+        assert opts["rest"]["uri"] == "https://api.example.com/chat"
 
-    def test_rest_headers_present(self):
+    def test_rest_headers_mapped(self):
         headers = {"Authorization": "Bearer sk-abc123", "X-Custom": "val"}
         cmd = self._build({"rest_headers": headers})
-        idx = cmd.index("--rest_headers")
-        parsed = json.loads(cmd[idx + 1])
-        assert parsed == headers
+        opts = _parse_generator_options(cmd)
+        assert opts["rest"]["headers"] == headers
 
-    def test_rest_body_template_present(self):
+    def test_rest_body_template_mapped_to_req_template(self):
         template = '{"model":"gpt-4","messages":[{"role":"user","content":"$INPUT"}]}'
         cmd = self._build({"rest_body_template": template})
-        idx = cmd.index("--rest_body_template")
-        assert cmd[idx + 1] == template
+        opts = _parse_generator_options(cmd)
+        assert opts["rest"]["req_template"] == template
 
-    def test_rest_response_json_field_present(self):
+    def test_rest_response_json_field_mapped(self):
         field = "choices[0].message.content"
         cmd = self._build({"rest_response_json_field": field})
-        idx = cmd.index("--rest_response_json_field")
-        assert cmd[idx + 1] == field
+        opts = _parse_generator_options(cmd)
+        assert opts["rest"]["response_json_field"] == field
+        assert opts["rest"]["response_json"] is True
 
-    def test_all_rest_flags_together(self):
+    def test_all_rest_fields_together(self):
         cmd = self._build({
             "rest_endpoint": "https://api.example.com/chat",
             "rest_headers": {"Authorization": "Bearer tok"},
             "rest_body_template": '{"msg": "$INPUT"}',
             "rest_response_json_field": "response.text",
         })
-        assert "--rest_endpoint" in cmd
-        assert "--rest_headers" in cmd
-        assert "--rest_body_template" in cmd
-        assert "--rest_response_json_field" in cmd
-
-        idx = cmd.index("--rest_endpoint")
-        assert cmd[idx + 1] == "https://api.example.com/chat"
-
-        idx = cmd.index("--rest_headers")
-        parsed = json.loads(cmd[idx + 1])
-        assert parsed == {"Authorization": "Bearer tok"}
-
-        idx = cmd.index("--rest_body_template")
-        assert cmd[idx + 1] == '{"msg": "$INPUT"}'
-
-        idx = cmd.index("--rest_response_json_field")
-        assert cmd[idx + 1] == "response.text"
+        opts = _parse_generator_options(cmd)
+        rest = opts["rest"]
+        assert rest["uri"] == "https://api.example.com/chat"
+        assert rest["headers"] == {"Authorization": "Bearer tok"}
+        assert rest["req_template"] == '{"msg": "$INPUT"}'
+        assert rest["response_json_field"] == "response.text"
+        assert rest["response_json"] is True
 
     def test_rest_flags_with_other_flags(self):
-        """REST flags work alongside standard flags like probes, generations."""
+        """REST config works alongside standard flags like probes, generations."""
         cmd = self._build({
             "rest_endpoint": "https://api.example.com/chat",
             "rest_body_template": '{"msg": "$INPUT"}',
@@ -279,19 +281,34 @@ class TestBuildCommandRestFlags:
             "generations": 10,
             "continue_on_error": True,
         })
-        assert "--rest_endpoint" in cmd
-        assert "--rest_body_template" in cmd
-        assert "--rest_response_json_field" in cmd
+        opts = _parse_generator_options(cmd)
+        assert "rest" in opts
+        assert opts["rest"]["uri"] == "https://api.example.com/chat"
         assert "--probes" in cmd
         assert "--continue_on_error" in cmd
 
+    def test_rest_generator_options_not_overwritten_by_user_opts(self):
+        """User-provided generator_options for rest are preserved; rest_* fields
+        fill in missing keys without overwriting."""
+        cmd = self._build({
+            "rest_endpoint": "https://api.example.com/chat",
+            "rest_body_template": '{"msg": "$INPUT"}',
+            "generator_options": {"rest": {"uri": "https://custom.url/v1", "max_tokens": 200}},
+        })
+        opts = _parse_generator_options(cmd)
+        # User's uri takes precedence
+        assert opts["rest"]["uri"] == "https://custom.url/v1"
+        assert opts["rest"]["max_tokens"] == 200
+        # rest_body_template fills in req_template since it wasn't in user opts
+        assert opts["rest"]["req_template"] == '{"msg": "$INPUT"}'
+
 
 # ---------------------------------------------------------------------------
-# T1.4: _build_command omits REST flags when absent
+# T1.4: _build_command omits REST generator_options when absent
 # ---------------------------------------------------------------------------
 
 class TestBuildCommandRestFlagsOmitted:
-    """T1.4: _build_command does NOT include --rest_* flags for Ollama configs."""
+    """T1.4: _build_command does NOT include REST generator_options for Ollama configs."""
 
     def _build(self, config_overrides: dict) -> list[str]:
         from scan_manager import ScanManager
@@ -302,38 +319,34 @@ class TestBuildCommandRestFlagsOmitted:
         base.update(config_overrides)
         return mgr._build_command(base)
 
-    def test_no_rest_flags_for_ollama(self):
+    def test_no_rest_opts_for_ollama(self):
         cmd = self._build({})
-        assert "--rest_endpoint" not in cmd
-        assert "--rest_headers" not in cmd
-        assert "--rest_body_template" not in cmd
-        assert "--rest_response_json_field" not in cmd
+        opts = _parse_generator_options(cmd)
+        assert "rest" not in opts
 
-    def test_no_rest_flags_with_none_values(self):
+    def test_no_rest_opts_with_none_values(self):
         cmd = self._build({
             "rest_endpoint": None,
             "rest_headers": None,
             "rest_body_template": None,
             "rest_response_json_field": None,
         })
-        assert "--rest_endpoint" not in cmd
-        assert "--rest_headers" not in cmd
-        assert "--rest_body_template" not in cmd
-        assert "--rest_response_json_field" not in cmd
+        opts = _parse_generator_options(cmd)
+        assert "rest" not in opts
 
-    def test_no_rest_flags_with_empty_string(self):
+    def test_no_rest_opts_with_empty_string(self):
         cmd = self._build({
             "rest_endpoint": "",
             "rest_body_template": "",
             "rest_response_json_field": "",
         })
-        assert "--rest_endpoint" not in cmd
-        assert "--rest_body_template" not in cmd
-        assert "--rest_response_json_field" not in cmd
+        opts = _parse_generator_options(cmd)
+        assert "rest" not in opts
 
-    def test_no_rest_flags_with_empty_headers(self):
+    def test_no_rest_opts_with_empty_headers(self):
         cmd = self._build({"rest_headers": {}})
-        assert "--rest_headers" not in cmd
+        opts = _parse_generator_options(cmd)
+        assert "rest" not in opts
 
 
 # ---------------------------------------------------------------------------
@@ -377,20 +390,15 @@ class TestRestSchemaToCommandRoundtrip:
         idx = cmd.index("--target_name")
         assert cmd[idx + 1] == "prod-chatbot"
 
-        # Verify REST flags
-        idx = cmd.index("--rest_endpoint")
-        assert cmd[idx + 1] == "https://api.myapp.com/v1/chat/completions"
-
-        idx = cmd.index("--rest_headers")
-        headers = json.loads(cmd[idx + 1])
-        assert headers["Authorization"] == "Bearer sk-abc123"
-        assert headers["Content-Type"] == "application/json"
-
-        idx = cmd.index("--rest_body_template")
-        assert "$INPUT" in cmd[idx + 1]
-
-        idx = cmd.index("--rest_response_json_field")
-        assert cmd[idx + 1] == "choices[0].message.content"
+        # Verify REST config in generator_options
+        opts = _parse_generator_options(cmd)
+        rest = opts["rest"]
+        assert rest["uri"] == "https://api.myapp.com/v1/chat/completions"
+        assert rest["headers"]["Authorization"] == "Bearer sk-abc123"
+        assert rest["headers"]["Content-Type"] == "application/json"
+        assert "$INPUT" in rest["req_template"]
+        assert rest["response_json_field"] == "choices[0].message.content"
+        assert rest["response_json"] is True
 
         # Verify standard flags still work
         assert "--probes" in cmd
@@ -403,7 +411,7 @@ class TestRestSchemaToCommandRoundtrip:
         assert cmd[idx + 1] == "0.6"
 
     def test_ollama_schema_to_command_no_rest(self):
-        """Ollama schema -> _build_command has no REST flags."""
+        """Ollama schema -> _build_command has no REST in generator_options."""
         config = ScanConfigRequest(
             target_type="ollama",
             target_name="llama3.2",
@@ -411,7 +419,5 @@ class TestRestSchemaToCommandRoundtrip:
             generations=5,
         )
         cmd = self._build(config.model_dump())
-        assert "--rest_endpoint" not in cmd
-        assert "--rest_headers" not in cmd
-        assert "--rest_body_template" not in cmd
-        assert "--rest_response_json_field" not in cmd
+        opts = _parse_generator_options(cmd)
+        assert "rest" not in opts

@@ -18,7 +18,7 @@ targets:
     headers:
       Authorization: "Bearer ${CI_LLM_TOKEN}"
     body_template: '{"model":"${CI_MODEL}","messages":[{"role":"user","content":"$INPUT"}]}'
-    response_field: "choices[0].message.content"
+    response_field: "$.choices[0].message.content"
 
 automation:
   exit_code_policy: threshold

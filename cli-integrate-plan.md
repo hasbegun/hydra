@@ -14,7 +14,7 @@ Add a Dockerized Python CLI tool with YAML-based scan plans, automated schedulin
 | Step | Description | Status | Commit |
 |------|-------------|--------|--------|
 | 1 | Add REST fields to `schemas.py` | DONE | `31969f5` |
-| 2 | Pass REST flags in `scan_manager.py` | DONE | `31969f5` |
+| 2 | Pass REST config via `--generator_options` in `scan_manager.py` | DONE | `31969f5`, refactored phase 4 |
 | 3 | Create `plan_loader.py` | DONE | `31969f5` |
 | 4 | Create `comparator.py` | DONE | `31969f5` |
 | 5 | Create `hydra_scan.py` | DONE | `31969f5` |
@@ -28,15 +28,17 @@ Add a Dockerized Python CLI tool with YAML-based scan plans, automated schedulin
 
 | Group | Tests | Status | Details |
 |-------|-------|--------|---------|
-| T1: Backend REST fields | 26 tests | PASS | `test_rest_target.py` — schema, command builder |
-| T2: Plan Loader | 29 tests | PASS | `test_plan_loader.py` — load, validate, merge, env vars |
+| T1: Backend REST fields | 27 tests | PASS | `test_rest_target.py` — schema, command builder, generator_options mapping |
+| T2: Plan Loader | 35 tests | PASS | `test_plan_loader.py` — load, validate, merge, env vars, generator_options, body_template strip |
 | T3: Comparator | 20 tests | PASS | `test_comparator.py` — find, compare, threshold, print |
 | T4: CLI (offline) | 21 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help |
 | T4: CLI (Docker integration) | 7 verified | PASS | --help, health, dry-run, validate, init, env vars, probes |
 | T4: CLI (E2E with Ollama) | 4 verified | PASS | T4.1 plan scan, T4.7 ad-hoc scan, T4.9 comparison, T5.3 Docker scan |
+| T4.2: Multi-target E2E | verified | PASS | 2 models (qwen2.5:1.5b, phi3:mini), sequential scan, separate reports |
+| T4.8: REST endpoint E2E | verified | PASS | Ollama OpenAI-compatible API via REST generator with JSONPath |
 | T5: Docker CLI | 3 verified | PASS | T5.1 --help, T5.2 health, T5.4 not in default compose |
-| T6: Regression | verified | PASS | 253 backend tests pass (1 pre-existing failure unrelated) |
-| **Total** | **96 automated + 14 manual** | **ALL PASS** | 0 regressions |
+| T6: Regression | verified | PASS | 254 backend + 76 CLI tests pass (1 pre-existing failure unrelated) |
+| **Total** | **103 automated + 16 manual** | **ALL PASS** | 0 regressions |
 
 ### Phase 3 Bug Fixes (found during E2E testing)
 
@@ -45,12 +47,19 @@ Add a Dockerized Python CLI tool with YAML-based scan plans, automated schedulin
 - `comparator.py`: `_extract_pass_rate` now checks `result.results.passed/failed` in addition to `summary` and top-level fields
 - `comparator.py`: `_extract_probe_rates` now handles both the flat test format (`digest.probe.{passed, failed}`) and the real garak nested format (`digest.group.probe._summary.probe_counts.detection_counts.{passed, fails}`)
 
+### Phase 4 Fixes (found during REST E2E and audit)
+
+- `scan_manager.py`: **Major fix** — REST config (`rest_endpoint`, `rest_headers`, `rest_body_template`, `rest_response_json_field`) is now mapped to `--generator_options` JSON keys (`uri`, `headers`, `req_template`, `response_json_field`) instead of non-existent `--rest_*` CLI flags. Garak v0.17 does not support `--rest_*` flags; all REST generator settings go through `--generator_options`.
+- `plan_loader.py`: Added `generator_options` pass-through from YAML target config to scan config (needed for `request_timeout`, `max_tokens`, etc.)
+- `plan_loader.py`: Body template values are now `.strip()`-ed to remove trailing newlines from YAML block scalars (`|`).
+- `hydra_scan.py`: `cmd_scan` now returns exit code 1 when failures are detected (was always returning 0).
+- `hydra_scan.py`: `cmd_history` now handles null `target_name` gracefully (falls back to `target_type` or `-`).
+- All examples and docs updated: `response_field` for OpenAI-compatible APIs now uses JSONPath format (`$.choices[0].message.content`) instead of bracket notation, which garak's RestGenerator requires.
+
 ### Remaining
 
 | ID | Test | Blocker |
 |----|------|---------|
-| T4.2 | Multi-target plan end-to-end | Needs plan with multiple available models |
-| T4.8 | REST plan scan end-to-end | Needs live REST endpoint |
 | T6.3 | Frontend GUI regression | Needs Flutter app |
 
 ---
@@ -172,7 +181,7 @@ Step 7: ScanManager._build_command() constructs the garak CLI command
       --rest_endpoint http://site.com/api/chat \
       --rest_headers '{"Authorization":"Bearer tk"}' \
       --rest_body_template '{"msg":"$INPUT"}' \
-      --rest_response_json_field "choices[0].message.content" \
+      --rest_response_json_field "$.choices[0].message.content" \
       --probes dan,encoding --generations 5
 
 Step 8: ScanManager runs garak as async subprocess, parses stdout
@@ -308,7 +317,7 @@ targets:
         "messages": [{"role": "user", "content": "$INPUT"}],
         "stream": false
       }
-    response_field: "choices[0].message.content"   # JSON path to extract LLM response
+    response_field: "$.choices[0].message.content"   # JSONPath to extract LLM response
     # Per-target overrides:
     probes:
       - dan
@@ -459,7 +468,7 @@ targets:
         "messages": [{"role": "user", "content": "$INPUT"}],
         "stream": false
       }
-    response_field: "choices[0].message.content"
+    response_field: "$.choices[0].message.content"
 ```
 
 | Field | Required | Description |
@@ -469,7 +478,7 @@ targets:
 | `endpoint` | Yes | Full URL of the HTTP API |
 | `headers` | No | HTTP headers (auth tokens, content type, etc.) |
 | `body_template` | Yes | JSON request body. `$INPUT` is replaced with each attack prompt. |
-| `response_field` | Yes | JSON path to extract the LLM's text response from the API response |
+| `response_field` | Yes | JSONPath expression (must start with `$`) to extract the LLM's text response |
 
 **How it maps to garak:** `--target_type rest --target_name "prod-chatbot" --rest_endpoint URL --rest_headers JSON --rest_body_template TPL --rest_response_json_field PATH`
 
@@ -617,7 +626,7 @@ targets:
         "messages": [{"role": "user", "content": "$INPUT"}],
         "stream": false
       }
-    response_field: "choices[0].message.content"
+    response_field: "$.choices[0].message.content"
 
   - name: "support-bot"
     type: rest
@@ -659,7 +668,7 @@ targets:
     headers:
       Authorization: "Bearer ${CI_LLM_TOKEN}"
     body_template: '{"model":"${CI_MODEL}","messages":[{"role":"user","content":"$INPUT"}]}'
-    response_field: "choices[0].message.content"
+    response_field: "$.choices[0].message.content"
 
 automation:
   exit_code_policy: threshold

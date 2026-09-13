@@ -305,9 +305,13 @@ def target_to_scan_config(target: dict, defaults: dict) -> dict:
         if merged.get("headers"):
             config["rest_headers"] = merged["headers"]
         if merged.get("body_template"):
-            config["rest_body_template"] = merged["body_template"]
+            config["rest_body_template"] = merged["body_template"].strip()
         if merged.get("response_field"):
             config["rest_response_json_field"] = merged["response_field"]
+
+    # Pass-through generator_options (for advanced settings like request_timeout)
+    if merged.get("generator_options"):
+        config["generator_options"] = merged["generator_options"]
 
     # Scan parameters (from merged target + defaults)
     for field, default in SCAN_DEFAULTS.items():

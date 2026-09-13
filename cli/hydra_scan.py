@@ -619,7 +619,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
     result = client.scan_results(scan_id)
     _print_summary(result, target_name, paths)
 
-    return 0
+    _, failed, _, _ = _extract_counts(result)
+    return 1 if failed > 0 else 0
 
 
 # ---------------------------------------------------------------------------
@@ -678,7 +679,7 @@ targets:
   #   headers:
   #     Authorization: "Bearer ${{API_KEY}}"
   #   body_template: '{{"model":"gpt-4","messages":[{{"role":"user","content":"$INPUT"}}]}}'
-  #   response_field: "choices[0].message.content"
+  #   response_field: "$.choices[0].message.content"
 
 output:
   directory: "./hydra_reports"
@@ -822,9 +823,9 @@ def cmd_history(args: argparse.Namespace) -> int:
     for s in scans:
         scan_id = s.get("scan_id", "")[:36]
         status = s.get("status", "")
-        target = s.get("target_name", "")[:18]
-        passed = s.get("passed", 0)
-        failed = s.get("failed", 0)
+        target = (s.get("target_name") or s.get("target_type") or "-")[:18]
+        passed = s.get("passed", 0) or 0
+        failed = s.get("failed", 0) or 0
         print(f"  {scan_id:<36s} {status:<12s} {target:<20s} {passed}/{failed}")
     return 0
 

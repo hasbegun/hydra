@@ -497,3 +497,116 @@ output:
         plan = load_plan(path)
         errors = validate_plan(plan)
         assert any("pdf" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Generator options pass-through
+# ---------------------------------------------------------------------------
+
+class TestGeneratorOptions:
+    """Tests for generator_options pass-through in plan_to_scan_configs."""
+
+    def test_generator_options_from_rest_target(self):
+        plan = {
+            "name": "test",
+            "targets": [
+                {
+                    "name": "api",
+                    "type": "rest",
+                    "endpoint": "http://example.com/chat",
+                    "body_template": '{"msg": "$INPUT"}',
+                    "response_field": "$.choices[0].message.content",
+                    "generator_options": {
+                        "rest": {"request_timeout": 120, "max_tokens": 200}
+                    },
+                },
+            ],
+        }
+        configs = plan_to_scan_configs(plan)
+        cfg = configs[0]
+        assert cfg["generator_options"] == {
+            "rest": {"request_timeout": 120, "max_tokens": 200}
+        }
+
+    def test_generator_options_from_ollama_target(self):
+        plan = {
+            "name": "test",
+            "targets": [
+                {
+                    "name": "t",
+                    "type": "ollama",
+                    "model": "llama3.2",
+                    "generator_options": {"ollama": {"num_ctx": 4096}},
+                },
+            ],
+        }
+        configs = plan_to_scan_configs(plan)
+        cfg = configs[0]
+        assert cfg["generator_options"] == {"ollama": {"num_ctx": 4096}}
+
+    def test_no_generator_options(self):
+        plan = {
+            "name": "test",
+            "targets": [
+                {"name": "t", "type": "ollama", "model": "llama3.2"},
+            ],
+        }
+        configs = plan_to_scan_configs(plan)
+        cfg = configs[0]
+        assert "generator_options" not in cfg
+
+
+# ---------------------------------------------------------------------------
+# Body template stripping
+# ---------------------------------------------------------------------------
+
+class TestBodyTemplateStrip:
+    """Verify YAML block scalar trailing newlines are stripped."""
+
+    def test_body_template_trailing_newline(self):
+        plan = {
+            "name": "test",
+            "targets": [
+                {
+                    "name": "api",
+                    "type": "rest",
+                    "endpoint": "http://example.com/chat",
+                    "body_template": '{"msg": "$INPUT"}\n',
+                    "response_field": "r",
+                },
+            ],
+        }
+        configs = plan_to_scan_configs(plan)
+        assert configs[0]["rest_body_template"] == '{"msg": "$INPUT"}'
+
+    def test_body_template_multiline_yaml(self, tmp_path):
+        yaml_content = """
+name: "test"
+targets:
+  - name: "api"
+    type: rest
+    endpoint: "http://example.com/chat"
+    body_template: |
+      {"msg": "$INPUT"}
+    response_field: "r"
+"""
+        path = _write_yaml(tmp_path, yaml_content)
+        plan = load_plan(path)
+        configs = plan_to_scan_configs(plan)
+        assert configs[0]["rest_body_template"] == '{"msg": "$INPUT"}'
+
+    def test_body_template_no_trailing_whitespace(self):
+        plan = {
+            "name": "test",
+            "targets": [
+                {
+                    "name": "api",
+                    "type": "rest",
+                    "endpoint": "http://example.com/chat",
+                    "body_template": '{"msg": "$INPUT"}',
+                    "response_field": "r",
+                },
+            ],
+        }
+        configs = plan_to_scan_configs(plan)
+        assert configs[0]["rest_body_template"] == '{"msg": "$INPUT"}'

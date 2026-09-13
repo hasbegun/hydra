@@ -87,7 +87,7 @@ targets:
       Authorization: "Bearer ${API_KEY}"
     body_template: |
       {"model":"gpt-4","messages":[{"role":"user","content":"$INPUT"}],"stream":false}
-    response_field: "choices[0].message.content"
+    response_field: "$.choices[0].message.content"
     probes:
       - dan
       - encoding

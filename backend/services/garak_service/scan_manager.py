@@ -305,20 +305,7 @@ class ScanManager:
         if config.get("parallel_attempts"):
             cmd.extend(["--parallel_attempts", str(config["parallel_attempts"])])
 
-        # REST target flags
-        if config.get("rest_endpoint"):
-            cmd.extend(["--rest_endpoint", config["rest_endpoint"]])
-
-        if config.get("rest_headers"):
-            cmd.extend(["--rest_headers", json.dumps(config["rest_headers"])])
-
-        if config.get("rest_body_template"):
-            cmd.extend(["--rest_body_template", config["rest_body_template"]])
-
-        if config.get("rest_response_json_field"):
-            cmd.extend(["--rest_response_json_field", config["rest_response_json_field"]])
-
-        # Generator options with Ollama host injection
+        # Generator options with Ollama host injection and REST config
         generator_type = config["target_type"].split(".")[0].lower()
         generator_options = {}
         if config.get("generator_options"):
@@ -327,6 +314,22 @@ class ScanManager:
                 generator_options = user_opts
             else:
                 generator_options = {generator_type: user_opts}
+
+        # REST target: map rest_* fields to generator_options for garak's RestGenerator
+        is_rest = generator_type == "rest"
+        if is_rest:
+            if "rest" not in generator_options:
+                generator_options["rest"] = {}
+            rest_opts = generator_options["rest"]
+            if config.get("rest_endpoint") and "uri" not in rest_opts:
+                rest_opts["uri"] = config["rest_endpoint"]
+            if config.get("rest_headers") and "headers" not in rest_opts:
+                rest_opts["headers"] = config["rest_headers"]
+            if config.get("rest_body_template") and "req_template" not in rest_opts:
+                rest_opts["req_template"] = config["rest_body_template"]
+            if config.get("rest_response_json_field") and "response_json_field" not in rest_opts:
+                rest_opts["response_json_field"] = config["rest_response_json_field"]
+                rest_opts.setdefault("response_json", True)
 
         ollama_host = os.environ.get("OLLAMA_HOST")
         is_ollama = "ollama" in generator_type
