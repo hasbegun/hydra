@@ -1,0 +1,25 @@
+# End-to-End Test Scan Plan
+# Uses the smallest available model for fast verification.
+# Usage: hydra_scan.py run --plan scan_plans/examples/e2e-test.yaml
+
+name: "e2e-test"
+description: "Fast E2E verification scan"
+
+defaults:
+  generations: 1
+
+targets:
+  - name: "qwen2.5-1.5b"
+    type: ollama
+    model: qwen2.5:1.5b
+    probes:
+      - dan.Dan_11_0
+
+output:
+  directory: "/reports"
+  filename_pattern: "{name}_{date}"
+
+compare:
+  enabled: true
+  baseline_dir: "/reports"
+  regression_threshold: 5.0

@@ -33,20 +33,24 @@ Add a Dockerized Python CLI tool with YAML-based scan plans, automated schedulin
 | T3: Comparator | 20 tests | PASS | `test_comparator.py` — find, compare, threshold, print |
 | T4: CLI (offline) | 21 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help |
 | T4: CLI (Docker integration) | 7 verified | PASS | --help, health, dry-run, validate, init, env vars, probes |
+| T4: CLI (E2E with Ollama) | 4 verified | PASS | T4.1 plan scan, T4.7 ad-hoc scan, T4.9 comparison, T5.3 Docker scan |
 | T5: Docker CLI | 3 verified | PASS | T5.1 --help, T5.2 health, T5.4 not in default compose |
 | T6: Regression | verified | PASS | 253 backend tests pass (1 pre-existing failure unrelated) |
-| **Total** | **96 automated + 10 manual** | **ALL PASS** | 0 regressions |
+| **Total** | **96 automated + 14 manual** | **ALL PASS** | 0 regressions |
 
-### Remaining (require live Ollama + models)
+### Phase 3 Bug Fixes (found during E2E testing)
+
+- `hydra_scan.py`: `_print_summary` now correctly extracts pass/fail from `result.results.passed/failed` (was looking at `summary.passed` which doesn't exist)
+- `hydra_scan.py`: Added `_extract_counts()` helper to centralize pass/fail/total/pass_rate extraction from the backend's JSON structure
+- `comparator.py`: `_extract_pass_rate` now checks `result.results.passed/failed` in addition to `summary` and top-level fields
+- `comparator.py`: `_extract_probe_rates` now handles both the flat test format (`digest.probe.{passed, failed}`) and the real garak nested format (`digest.group.probe._summary.probe_counts.detection_counts.{passed, fails}`)
+
+### Remaining
 
 | ID | Test | Blocker |
 |----|------|---------|
-| T4.1 | `run --plan quick-ollama.yaml` end-to-end | Needs Ollama model pulled |
-| T4.2 | Multi-target plan end-to-end | Needs multiple models |
-| T4.7 | Ad-hoc `scan --model` end-to-end | Needs Ollama model |
+| T4.2 | Multi-target plan end-to-end | Needs plan with multiple available models |
 | T4.8 | REST plan scan end-to-end | Needs live REST endpoint |
-| T4.9 | Comparison output with real data | Needs 2 completed scans |
-| T5.3 | Docker CLI full scan | Needs Ollama model |
 | T6.3 | Frontend GUI regression | Needs Flutter app |
 
 ---

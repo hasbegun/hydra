@@ -298,14 +298,44 @@ def _save_reports(
 # Terminal summary
 # ---------------------------------------------------------------------------
 
+def _extract_counts(result: dict) -> tuple:
+    """Extract passed/failed/total/pass_rate from a scan result dict.
+
+    The backend returns data in several possible locations:
+    - ``result["results"]["passed"]`` / ``result["results"]["failed"]``
+    - ``result["summary"]["total_tests"]`` / ``result["summary"]["pass_rate"]``
+    - ``result["passed"]`` / ``result["failed"]`` (top-level fallback)
+    """
+    results = result.get("results", {}) or {}
+    summary = result.get("summary", {}) or {}
+
+    passed = results.get("passed") if results.get("passed") is not None else result.get("passed")
+    failed = results.get("failed") if results.get("failed") is not None else result.get("failed")
+
+    if passed is None:
+        passed = summary.get("passed", 0)
+    if failed is None:
+        failed = summary.get("failed", 0)
+
+    passed = passed or 0
+    failed = failed or 0
+
+    total = summary.get("total_tests") or (passed + failed)
+
+    if summary.get("pass_rate") is not None:
+        pass_rate = float(summary["pass_rate"])
+    elif total > 0:
+        pass_rate = (passed / total) * 100.0
+    else:
+        pass_rate = 0.0
+
+    return passed, failed, total, pass_rate
+
+
 def _print_summary(result: dict, target_name: str, paths: Dict[str, str]) -> None:
     """Print a compact scan summary to stdout."""
-    summary = result.get("summary", {})
     status = result.get("status", "unknown")
-    passed = summary.get("passed", result.get("passed", 0))
-    failed = summary.get("failed", result.get("failed", 0))
-    total = passed + failed
-    pass_rate = (passed / total * 100) if total > 0 else 0
+    passed, failed, total, pass_rate = _extract_counts(result)
 
     print()
     print("=" * 60)
@@ -438,11 +468,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 _info("  No previous result found for comparison.", quiet)
 
         # Build result record for JSON stdout
-        summary = result.get("summary", {})
-        passed = summary.get("passed", result.get("passed", 0))
-        failed = summary.get("failed", result.get("failed", 0))
-        total = passed + failed
-        pass_rate = (passed / total * 100) if total > 0 else 0
+        passed, failed, total, pass_rate = _extract_counts(result)
 
         target_result = {
             "name": target_name,

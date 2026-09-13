@@ -113,27 +113,32 @@ def find_previous_result(
 def _extract_pass_rate(result: dict) -> float:
     """Extract overall pass rate from a scan result JSON.
 
-    Looks for common result structures from the backend API.
+    The backend API returns data in several possible locations:
+    - ``result["summary"]["pass_rate"]``
+    - ``result["results"]["passed"]`` / ``result["results"]["failed"]``
+    - ``result["passed"]`` / ``result["failed"]``
     """
-    # Direct pass_rate field
-    if "pass_rate" in result:
-        return float(result["pass_rate"])
-
-    # From summary
-    summary = result.get("summary", {})
-    if summary and "pass_rate" in summary:
+    # From summary.pass_rate (most direct)
+    summary = result.get("summary", {}) or {}
+    if summary.get("pass_rate") is not None:
         return float(summary["pass_rate"])
 
-    # Calculate from passed/failed counts
-    passed = 0
-    failed = 0
+    # Direct pass_rate field
+    if result.get("pass_rate") is not None:
+        return float(result["pass_rate"])
 
-    if "passed" in result and "failed" in result:
-        passed = result["passed"]
-        failed = result["failed"]
-    elif summary:
+    # Calculate from passed/failed counts — check results sub-object first
+    results = result.get("results", {}) or {}
+    passed = results.get("passed") if results.get("passed") is not None else result.get("passed")
+    failed = results.get("failed") if results.get("failed") is not None else result.get("failed")
+
+    if passed is None:
         passed = summary.get("passed", 0)
+    if failed is None:
         failed = summary.get("failed", 0)
+
+    passed = passed or 0
+    failed = failed or 0
 
     total = passed + failed
     if total == 0:
@@ -145,29 +150,74 @@ def _extract_probe_rates(result: dict) -> Dict[str, float]:
     """Extract per-probe pass rates from a scan result JSON.
 
     Returns a dict mapping probe name to pass rate percentage.
+
+    Handles the garak digest format::
+
+        digest:
+          dan:                           # probe group
+            _summary: { score: ... }
+            dan.Dan_11_0:                # specific probe
+              _summary:
+                probe_score: 0.0
+                probe_counts:
+                  detection_counts:
+                    passed: 0
+                    fails: 2
     """
     rates: Dict[str, float] = {}
 
     # Check digest (from garak report)
-    digest = result.get("digest", {})
-    if digest:
-        for probe_name, probe_data in digest.items():
-            if isinstance(probe_data, dict):
-                passed = probe_data.get("passed", 0)
-                failed = probe_data.get("failed", 0)
+    # Supports two formats:
+    #   Flat:   digest.probe_name.{passed, failed}
+    #   Nested: digest.group.probe_name._summary.probe_counts.detection_counts
+    digest = result.get("digest", {}) or {}
+    for entry_name, entry_data in digest.items():
+        if not isinstance(entry_data, dict):
+            continue
+
+        # Check if this entry is a flat probe (has passed/failed directly)
+        if "passed" in entry_data or "failed" in entry_data or "fails" in entry_data:
+            passed = entry_data.get("passed", 0)
+            failed = entry_data.get("failed", entry_data.get("fails", 0))
+            total = passed + failed
+            if total > 0:
+                rates[entry_name] = (passed / total) * 100.0
+            continue
+
+        # Otherwise treat as a probe group — iterate sub-entries
+        for key, value in entry_data.items():
+            if key == "_summary" or not isinstance(value, dict):
+                continue
+
+            probe_summary = value.get("_summary", {})
+            if probe_summary:
+                # Real garak format: _summary.probe_counts.detection_counts
+                counts = probe_summary.get("probe_counts", {})
+                det_counts = counts.get("detection_counts", {})
+                passed = det_counts.get("passed", 0)
+                failed = det_counts.get("fails", 0)
                 total = passed + failed
                 if total > 0:
-                    rates[probe_name] = (passed / total) * 100.0
+                    rates[key] = (passed / total) * 100.0
+                elif probe_summary.get("probe_score") is not None:
+                    rates[key] = float(probe_summary["probe_score"]) * 100.0
+            else:
+                # Sub-entry with direct passed/failed
+                passed = value.get("passed", 0)
+                failed = value.get("failed", value.get("fails", 0))
+                total = passed + failed
+                if total > 0:
+                    rates[key] = (passed / total) * 100.0
 
     # Check results.probes (alternative structure)
-    results = result.get("results", {})
+    results = result.get("results", {}) or {}
     if isinstance(results, dict):
         probes = results.get("probes", {})
         if isinstance(probes, dict):
             for probe_name, probe_data in probes.items():
                 if isinstance(probe_data, dict) and probe_name not in rates:
                     passed = probe_data.get("passed", 0)
-                    failed = probe_data.get("failed", 0)
+                    failed = probe_data.get("failed", probe_data.get("fails", 0))
                     total = passed + failed
                     if total > 0:
                         rates[probe_name] = (passed / total) * 100.0
