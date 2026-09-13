@@ -1,0 +1,29 @@
+cli/scan_plans/examples/e2e-test.yaml
+  99dfa3997dfaafb7 1-25
+cli-integrate-plan.md
+  99dfa3997dfaafb7 36,39,41-48,52
+cli/hydra_scan.py
+  99dfa3997dfaafb7 301-334,338,471
+cli/comparator.py
+  99dfa3997dfaafb7 116-119,121-125,127,130-133,135,137,140-142,153-165,170-207,210,213,220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "d1d50332ec7b4fa09445a6393cafaedcd7db68fa",
+  "prompts": {
+    "99dfa3997dfaafb7": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "polarized-plane",
+        "model": "unknown"
+      },
+      "human_author": "Inho Choi",
+      "messages": [],
+      "total_additions": 150,
+      "total_deletions": 45,
+      "accepted_lines": 145,
+      "overriden_lines": 0
+    }
+  }
+}
