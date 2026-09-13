@@ -1,0 +1,23 @@
+cli/tests/test_hydra_scan.py
+  99dfa3997dfaafb7 7,28-73,486,490,494,496,500,504,522,526,530,549,553,557,576,580,584,611,615,637,641,645,713,718-721
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "67dac084e9d49cc2e4e9ba4833634f095ce31fa0",
+  "prompts": {
+    "99dfa3997dfaafb7": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "polarized-plane",
+        "model": "unknown"
+      },
+      "human_author": "Inho Choi",
+      "messages": [],
+      "total_additions": 72,
+      "total_deletions": 89,
+      "accepted_lines": 72,
+      "overriden_lines": 0
+    }
+  }
+}
