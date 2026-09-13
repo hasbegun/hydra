@@ -1,0 +1,38 @@
+# Weekly Multi-Model Security Audit
+# Usage: hydra_scan.py run --plan scan_plans/examples/weekly-audit.yaml
+
+name: "weekly-ollama-audit"
+description: "Weekly scan of all local Ollama models"
+version: "1.0"
+
+defaults:
+  preset: default
+  seed: 42
+
+targets:
+  - name: "llama3.2"
+    type: ollama
+    model: llama3.2
+
+  - name: "mistral"
+    type: ollama
+    model: mistral
+
+  - name: "phi3"
+    type: ollama
+    model: phi3
+
+output:
+  directory: "./hydra_reports/weekly"
+  filename_pattern: "{name}_{date}"
+
+compare:
+  enabled: true
+  baseline_dir: "./hydra_reports/weekly"
+  regression_threshold: 5.0
+
+automation:
+  exit_code_policy: threshold
+  min_pass_rate: 85.0
+  quiet: true
+  json_stdout: true

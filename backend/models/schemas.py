@@ -28,6 +28,7 @@ class GeneratorType(str, Enum):
     MISTRAL = "mistral"
     AZURE = "azure"
     BEDROCK = "bedrock"
+    REST = "rest"
 
 
 class ScanConfigRequest(BaseModel):
@@ -114,6 +115,24 @@ class ScanConfigRequest(BaseModel):
     continue_on_error: bool = Field(
         default=False,
         description="Continue scan even if some probes fail"
+    )
+
+    # REST target fields (for scanning HTTP/REST LLM endpoints)
+    rest_endpoint: Optional[str] = Field(
+        default=None,
+        description="REST API endpoint URL for the target LLM service"
+    )
+    rest_headers: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="HTTP headers for REST target requests (e.g., Authorization)"
+    )
+    rest_body_template: Optional[str] = Field(
+        default=None,
+        description="JSON body template for REST target; $INPUT is replaced with the attack prompt"
+    )
+    rest_response_json_field: Optional[str] = Field(
+        default=None,
+        description="JSON path to extract the LLM response from the REST API response"
     )
 
     # Exclude probes

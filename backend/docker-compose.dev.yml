@@ -95,3 +95,14 @@ services:
       timeout: 2s
       retries: 1
       start_period: 1s
+
+  cli:
+    # In dev mode, override depends_on since backend healthcheck is disabled
+    depends_on:
+      backend:
+        condition: service_started
+    # Mount CLI source for live editing during development
+    volumes:
+      - ../cli:/app:cached
+      - ${CLI_PLANS_DIR:-./cli_plans}:/plans:ro
+      - ${CLI_REPORTS_DIR:-./cli_reports}:/reports

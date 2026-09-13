@@ -1,0 +1,9 @@
+# Quick Ollama Scan
+# Usage: hydra_scan.py run --plan scan_plans/examples/quick-ollama.yaml
+
+name: "quick-ollama"
+targets:
+  - name: "llama3.2"
+    type: ollama
+    model: llama3.2
+    preset: fast

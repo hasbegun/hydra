@@ -1,0 +1,27 @@
+# CI/CD Pipeline Gate Scan
+# Usage: hydra_scan.py run --plan scan_plans/examples/ci-gate.yaml
+#
+# Set environment variables in CI:
+#   CI_LLM_ENDPOINT, CI_LLM_TOKEN, CI_MODEL
+
+name: "ci-gate"
+description: "Fast gate scan for CI pipeline"
+
+defaults:
+  preset: fast
+  continue_on_error: true
+
+targets:
+  - name: "staging-api"
+    type: rest
+    endpoint: "${CI_LLM_ENDPOINT}"
+    headers:
+      Authorization: "Bearer ${CI_LLM_TOKEN}"
+    body_template: '{"model":"${CI_MODEL}","messages":[{"role":"user","content":"$INPUT"}]}'
+    response_field: "choices[0].message.content"
+
+automation:
+  exit_code_policy: threshold
+  min_pass_rate: 90.0
+  quiet: true
+  json_stdout: true

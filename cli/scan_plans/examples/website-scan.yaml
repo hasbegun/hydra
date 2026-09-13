@@ -1,0 +1,36 @@
+# REST / Website Endpoint Scan
+# Usage: hydra_scan.py run --plan scan_plans/examples/website-scan.yaml
+#
+# Set environment variables before running:
+#   export OPENWEBUI_TOKEN="your-token-here"
+
+name: "website-scan"
+description: "Scan an OpenWebUI or OpenAI-compatible REST endpoint"
+
+defaults:
+  preset: owasp
+  generations: 15
+  continue_on_error: true
+
+targets:
+  - name: "openwebui-local"
+    type: rest
+    endpoint: "http://host.docker.internal:3030/api/v1/chat/completions"
+    headers:
+      Authorization: "Bearer ${OPENWEBUI_TOKEN}"
+    body_template: |
+      {
+        "model": "mistral:latest",
+        "messages": [{"role": "user", "content": "$INPUT"}],
+        "stream": false
+      }
+    response_field: "choices[0].message.content"
+
+output:
+  directory: "./hydra_reports/website"
+  filename_pattern: "{name}_{date}"
+
+compare:
+  enabled: true
+  fail_on_regression: true
+  regression_threshold: 3.0

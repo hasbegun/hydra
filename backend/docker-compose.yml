@@ -135,6 +135,27 @@ services:
       retries: 3
       start_period: 60s
 
+  cli:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile.cli
+    image: hydra-cli
+    container_name: hydra-cli
+    profiles:
+      - cli
+    environment:
+      HYDRA_BACKEND_URL: "http://backend:8888"
+    volumes:
+      - ${CLI_PLANS_DIR:-./cli_plans}:/plans:ro
+      - ${CLI_REPORTS_DIR:-./cli_reports}:/reports
+    networks:
+      - hydra-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   pg-data:
     driver: local

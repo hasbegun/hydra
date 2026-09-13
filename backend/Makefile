@@ -1,4 +1,4 @@
-.PHONY: help test test-cli test-cache test-workflow test-logging test-statistics test-templates test-concurrent test-local clean check-env health \
+.PHONY: help test test-cli test-rest test-cache test-workflow test-logging test-statistics test-templates test-concurrent test-local test-cli-tool clean check-env health \
         hydra-up hydra-down hydra-restart hydra-logs hydra-ps hydra-pull hydra-build \
         hydra-dev hydra-dev-down hydra-dev-logs hydra-dev-restart hydra-dev-attach \
         hydra-prod hydra-prod-down hydra-prod-logs \
@@ -23,14 +23,24 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}'
 
 test: ## Run all tests inside backend container (requires dev mode: make hydra-dev)
-	@echo "$(BLUE)Running tests in container...$(NC)"
-	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml exec backend python -m pytest tests/test_cli_flags.py tests/test_report_cache.py tests/test_workflow_analyzer.py tests/test_logging_config.py tests/test_scan_statistics.py tests/test_config_templates.py tests/test_concurrent_scans.py -v
-	@echo "$(GREEN)✓ All container tests passed$(NC)"
+	@echo "$(BLUE)Running backend tests in container...$(NC)"
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml exec backend python -m pytest tests/test_cli_flags.py tests/test_rest_target.py tests/test_report_cache.py tests/test_workflow_analyzer.py tests/test_logging_config.py tests/test_scan_statistics.py tests/test_config_templates.py tests/test_concurrent_scans.py -v
+	@echo "$(GREEN)✓ All backend container tests passed$(NC)"
 
 test-cli: ## Run CLI flag tests locally (no container needed)
 	@echo "$(BLUE)Running CLI flag tests...$(NC)"
 	python3 -m pytest tests/test_cli_flags.py -v
 	@echo "$(GREEN)✓ CLI flag tests passed$(NC)"
+
+test-rest: ## Run REST target tests locally (no container needed)
+	@echo "$(BLUE)Running REST target tests...$(NC)"
+	python3 -m pytest tests/test_rest_target.py -v
+	@echo "$(GREEN)✓ REST target tests passed$(NC)"
+
+test-cli-tool: ## Run CLI tool tests inside CLI container (requires dev mode)
+	@echo "$(BLUE)Running CLI tool tests in container...$(NC)"
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml run --rm --entrypoint python cli -m pytest tests/ -v
+	@echo "$(GREEN)✓ CLI tool tests passed$(NC)"
 
 test-cache: ## Run report cache tests locally (no container needed)
 	@echo "$(BLUE)Running report cache tests...$(NC)"
@@ -64,8 +74,17 @@ test-concurrent: ## Run concurrent scan tests locally (no container needed)
 
 test-local: ## Run all local tests (no container needed)
 	@echo "$(BLUE)Running all local tests...$(NC)"
-	python3 -m pytest tests/test_cli_flags.py tests/test_report_cache.py tests/test_workflow_analyzer.py tests/test_logging_config.py tests/test_scan_statistics.py tests/test_config_templates.py tests/test_concurrent_scans.py -v
+	python3 -m pytest tests/test_cli_flags.py tests/test_rest_target.py tests/test_report_cache.py tests/test_workflow_analyzer.py tests/test_logging_config.py tests/test_scan_statistics.py tests/test_config_templates.py tests/test_concurrent_scans.py -v
 	@echo "$(GREEN)✓ All local tests passed$(NC)"
+
+test-all: ## Run all tests (backend + CLI) in containers
+	@echo "$(BLUE)Running all backend tests...$(NC)"
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml exec backend python -m pytest tests/test_cli_flags.py tests/test_rest_target.py tests/test_report_cache.py tests/test_workflow_analyzer.py tests/test_logging_config.py tests/test_scan_statistics.py tests/test_config_templates.py tests/test_concurrent_scans.py -v
+	@echo "$(GREEN)✓ Backend tests passed$(NC)"
+	@echo "$(BLUE)Running CLI tool tests...$(NC)"
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml run --rm --entrypoint python cli -m pytest tests/ -v
+	@echo "$(GREEN)✓ CLI tests passed$(NC)"
+	@echo "$(GREEN)✓ All tests passed$(NC)"
 
 clean: ## Clean up Python cache files
 	@echo "$(BLUE)Cleaning up...$(NC)"

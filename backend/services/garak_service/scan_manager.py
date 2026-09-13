@@ -305,6 +305,19 @@ class ScanManager:
         if config.get("parallel_attempts"):
             cmd.extend(["--parallel_attempts", str(config["parallel_attempts"])])
 
+        # REST target flags
+        if config.get("rest_endpoint"):
+            cmd.extend(["--rest_endpoint", config["rest_endpoint"]])
+
+        if config.get("rest_headers"):
+            cmd.extend(["--rest_headers", json.dumps(config["rest_headers"])])
+
+        if config.get("rest_body_template"):
+            cmd.extend(["--rest_body_template", config["rest_body_template"]])
+
+        if config.get("rest_response_json_field"):
+            cmd.extend(["--rest_response_json_field", config["rest_response_json_field"]])
+
         # Generator options with Ollama host injection
         generator_type = config["target_type"].split(".")[0].lower()
         generator_options = {}

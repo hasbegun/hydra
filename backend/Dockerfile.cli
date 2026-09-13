@@ -1,0 +1,28 @@
+# Hydra CLI - Lightweight Python container for scan plan execution
+# Does NOT contain garak; talks to the backend API over the Docker network.
+#
+# Build context must be the hydra root (parent of backend/ and cli/).
+# docker compose handles this via context: ..
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install CLI dependencies + pytest for testing
+COPY cli/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir 'pytest>=7.0,<9.0'
+
+# Copy CLI source
+COPY cli/ /app/
+
+# Default directories for plans and reports
+RUN mkdir -p /plans /reports
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV HYDRA_BACKEND_URL=http://backend:8888
+
+ENTRYPOINT ["python", "hydra_scan.py"]
+CMD ["--help"]
