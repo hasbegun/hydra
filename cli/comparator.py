@@ -4,6 +4,7 @@ Result comparison engine for Hydra CLI scan results.
 Compares current scan results with previous runs to detect regressions
 and improvements in pass rates, both overall and per-probe.
 """
+import datetime
 import json
 import re
 import sys
@@ -238,7 +239,6 @@ def _extract_date_from_filename(filepath: Path) -> str:
     if match:
         return match.group(1)
 
-    import datetime
     mtime = filepath.stat().st_mtime
     return datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
 

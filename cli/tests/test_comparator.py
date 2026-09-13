@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from comparator import (
     ComparisonResult,
     ProbeComparison,
+    _extract_date_from_filename,
     check_regression,
     compare_results,
     extract_counts,
@@ -383,3 +384,29 @@ class TestExtractCounts:
         }
         p, f, _, _ = extract_counts(result)
         assert (p, f) == (3, 7)
+
+
+# ---------------------------------------------------------------------------
+# _extract_date_from_filename
+# ---------------------------------------------------------------------------
+
+class TestExtractDateFromFilename:
+    """Tests for date extraction from result filenames."""
+
+    def test_standard_format(self, tmp_path):
+        f = tmp_path / "model_2026-01-13.json"
+        f.write_text("{}")
+        assert _extract_date_from_filename(f) == "2026-01-13"
+
+    def test_date_in_middle(self, tmp_path):
+        f = tmp_path / "target_2025-12-01_extra.json"
+        f.write_text("{}")
+        assert _extract_date_from_filename(f) == "2025-12-01"
+
+    def test_no_date_falls_back_to_mtime(self, tmp_path):
+        f = tmp_path / "no-date-here.json"
+        f.write_text("{}")
+        result = _extract_date_from_filename(f)
+        # Should be a valid date string from the file's mtime
+        import re as re_mod
+        assert re_mod.match(r"\d{4}-\d{2}-\d{2}", result)

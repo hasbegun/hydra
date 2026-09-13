@@ -17,7 +17,7 @@ import datetime
 import json
 import os
 import re
-import signal
+
 import subprocess
 import sys
 import time
@@ -274,13 +274,16 @@ def _save_reports(
     now = datetime.datetime.now()
 
     safe_name = _sanitize_filename(target_name)
-    basename = pattern.format(
-        name=safe_name,
-        date=now.strftime(ts_fmt),
-        time=now.strftime("%H%M%S"),
-        plan="",
-        preset="",
-    )
+    try:
+        basename = pattern.format(
+            name=safe_name,
+            date=now.strftime(ts_fmt),
+            time=now.strftime("%H%M%S"),
+            plan="",
+            preset="",
+        )
+    except KeyError:
+        basename = f"{safe_name}_{now.strftime(ts_fmt)}"
 
     paths: Dict[str, str] = {}
 
@@ -553,9 +556,14 @@ def cmd_scan(args: argparse.Namespace) -> int:
     config: Dict[str, Any] = {
         "target_type": args.target_type or "ollama",
         "target_name": args.model or "unknown",
-        "generations": args.generations,
-        "eval_threshold": args.eval_threshold,
     }
+
+    # Only set scan params when explicitly provided by the user, so preset
+    # values can fill in the gaps.  argparse defaults are None for these.
+    if args.generations is not None:
+        config["generations"] = args.generations
+    if args.eval_threshold is not None:
+        config["eval_threshold"] = args.eval_threshold
 
     if args.probes:
         config["probes"] = args.probes.split(",")
@@ -573,18 +581,22 @@ def cmd_scan(args: argparse.Namespace) -> int:
         except json.JSONDecodeError:
             _error("--rest-headers must be valid JSON")
 
-    # Fetch preset
+    # Fetch preset — fills in keys not already set by the user
     if args.preset:
         try:
             preset_data = client.get_preset(args.preset)
             preset_config = preset_data.get("config", {})
             if "probes" not in config and preset_config.get("probes"):
                 config["probes"] = preset_config["probes"]
-            for key in ("generations", "parallel_attempts", "parallel_requests"):
+            for key in ("generations", "eval_threshold", "parallel_attempts", "parallel_requests"):
                 if key in preset_config and key not in config:
                     config[key] = preset_config[key]
         except SystemExit:
             _info(f"Warning: preset '{args.preset}' not available")
+
+    # Apply scan defaults for anything still missing
+    config.setdefault("generations", 5)
+    config.setdefault("eval_threshold", 0.5)
 
     target_name = args.model or args.rest_endpoint or "target"
 
@@ -891,8 +903,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--target-type", default=None, help="Target type (ollama, rest)")
     p_scan.add_argument("--preset", default=None, choices=list(VALID_PRESETS), help="Config preset")
     p_scan.add_argument("--probes", default=None, help="Comma-separated probe names")
-    p_scan.add_argument("--generations", type=int, default=5, help="Generations per probe")
-    p_scan.add_argument("--eval-threshold", type=float, default=0.5, help="Eval threshold")
+    p_scan.add_argument("--generations", type=int, default=None, help="Generations per probe (default: 5, or from preset)")
+    p_scan.add_argument("--eval-threshold", type=float, default=None, help="Eval threshold (default: 0.5, or from preset)")
     p_scan.add_argument("--rest-endpoint", default=None, help="REST API endpoint URL")
     p_scan.add_argument("--rest-body-template", default=None, help="REST body template (JSON, $INPUT placeholder)")
     p_scan.add_argument("--rest-response-field", default=None, help="JSON path for REST response extraction")

@@ -30,15 +30,15 @@ Add a Dockerized Python CLI tool with YAML-based scan plans, automated schedulin
 |-------|-------|--------|---------|
 | T1: Backend REST fields | 27 tests | PASS | `test_rest_target.py` — schema, command builder, generator_options mapping |
 | T2: Plan Loader | 35 tests | PASS | `test_plan_loader.py` — load, validate, merge, env vars, generator_options, body_template strip |
-| T3: Comparator | 27 tests | PASS | `test_comparator.py` — find, compare, threshold, print, extract_counts |
-| T4: CLI (offline) | 63 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help, defaults, overrides, exit codes, quiet/JSON, error handling, report saving, filename sanitization, progress bar, plan loading |
+| T3: Comparator | 30 tests | PASS | `test_comparator.py` — find, compare, threshold, print, extract_counts, date extraction |
+| T4: CLI (offline) | 73 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help, defaults, overrides, exit codes, quiet/JSON, error handling, report saving, filename sanitization, progress bar, plan loading, print summary, compare, preset override |
 | T4: CLI (Docker integration) | 7 verified | PASS | --help, health, dry-run, validate, init, env vars, probes |
 | T4: CLI (E2E with Ollama) | 4 verified | PASS | T4.1 plan scan, T4.7 ad-hoc scan, T4.9 comparison, T5.3 Docker scan |
 | T4.2: Multi-target E2E | verified | PASS | 2 models (qwen2.5:1.5b, phi3:mini), sequential scan, separate reports |
 | T4.8: REST endpoint E2E | verified | PASS | Ollama OpenAI-compatible API via REST generator with JSONPath |
 | T5: Docker CLI | 3 verified | PASS | T5.1 --help, T5.2 health, T5.4 not in default compose |
-| T6: Regression | verified | PASS | 254 backend + 125 CLI tests pass (1 pre-existing failure unrelated) |
-| **Total** | **152 automated + 16 manual** | **ALL PASS** | 0 regressions |
+| T6: Regression | verified | PASS | 254 backend + 138 CLI tests pass (1 pre-existing failure unrelated) |
+| **Total** | **165 automated + 16 manual** | **ALL PASS** | 0 regressions |
 
 ### Phase 3 Bug Fixes (found during E2E testing)
 
@@ -90,6 +90,26 @@ Systematic refactoring to eliminate all identified code duplication across CLI m
 - Both commands had identical try/except blocks for `load_plan()` + `validate_plan()` with error printing. Extracted into `_load_and_validate_plan(path)` which returns the plan dict or None on validation failure (and calls `_error()` on I/O errors). Both commands now call this single helper. Removed 15 lines of duplicated code.
 
 **16 new tests** covering refactored code: `extract_counts` (7 tests in comparator), `_render_progress_line` (5 tests), `_load_and_validate_plan` (4 tests).
+
+### Phase 8: Deep Quality Audit & Coverage Hardening
+
+Thorough code audit of every module, focusing on logic correctness, edge cases, and test coverage gaps.
+
+**Bugs found and fixed:**
+1. **`cmd_scan` preset override** (logic bug): `--generations` and `--eval-threshold` had hardcoded argparse defaults (5 and 0.5), which meant preset values could never override them. Changed argparse defaults to `None` so preset values fill in when the user doesn't explicitly set these params. Explicit defaults applied after preset merging via `config.setdefault()`.
+2. **`_save_reports` pattern KeyError**: If `filename_pattern` contains an unexpected `{placeholder}`, `str.format()` raises `KeyError`. Added try/except fallback to `{name}_{date}` format.
+
+**Code cleanup:**
+- Removed unused `import signal` from `hydra_scan.py`.
+- Removed unused `Optional`, `Tuple` imports from `plan_loader.py`.
+- Moved `import datetime` from inside `_extract_date_from_filename` to module-level in `comparator.py`.
+
+**13 new tests** covering previously untested code paths:
+- `_print_summary` output formatting (3 tests)
+- `_save_reports` filename pattern `KeyError` fallback (1 test)
+- `cmd_scan` preset override logic — argparse defaults are `None` (2 tests)
+- `cmd_compare` — two-file comparison, insufficient files, nonexistent dir, regression detection (4 tests)
+- `_extract_date_from_filename` — standard, middle, mtime fallback (3 tests)
 
 ### Remaining
 
@@ -1165,7 +1185,7 @@ PyYAML>=6.0,<7.0
 
 | File | Description | Lines |
 |------|-------------|-------|
-| `cli/hydra_scan.py` | Main CLI tool | 979 |
+| `cli/hydra_scan.py` | Main CLI tool | 991 |
 | `cli/plan_loader.py` | YAML plan parser, validator, env var resolver | 342 |
 | `cli/comparator.py` | Result comparison engine + shared extract_counts | 379 |
 | `cli/requirements.txt` | `requests`, `websocket-client`, `PyYAML` | 3 |
@@ -1177,8 +1197,8 @@ PyYAML>=6.0,<7.0
 | `backend/Dockerfile.cli` | CLI Docker image | 28 |
 | `backend/tests/test_rest_target.py` | Backend REST field tests | 417 |
 | `cli/tests/test_plan_loader.py` | Plan loader tests | 499 |
-| `cli/tests/test_comparator.py` | Comparator + extract_counts tests | 385 |
-| `cli/tests/test_hydra_scan.py` | CLI tool tests | 963 |
+| `cli/tests/test_comparator.py` | Comparator + extract_counts tests | 412 |
+| `cli/tests/test_hydra_scan.py` | CLI tool tests | 1118 |
 
 ### Modified Files (5) [ALL DONE]
 

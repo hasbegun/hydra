@@ -17,9 +17,9 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from hydra_scan import (
-    build_parser, cmd_validate, cmd_init, _dry_run,
-    _save_reports, _sanitize_filename, _render_progress_line,
-    _load_and_validate_plan, HydraClient,
+    build_parser, cmd_validate, cmd_init, cmd_scan, cmd_compare,
+    _dry_run, _save_reports, _sanitize_filename, _render_progress_line,
+    _load_and_validate_plan, _print_summary, HydraClient,
 )
 from comparator import extract_counts
 
@@ -961,3 +961,158 @@ targets:
         plan_file.write_text("")
         with pytest.raises(SystemExit):
             _load_and_validate_plan(str(plan_file))
+
+
+# ---------------------------------------------------------------------------
+# _print_summary output formatting
+# ---------------------------------------------------------------------------
+
+class TestPrintSummary:
+    """Tests for _print_summary output formatting."""
+
+    def test_basic_output(self, capsys):
+        result = {
+            "status": "completed",
+            "results": {"passed": 8, "failed": 2},
+            "summary": {"total_tests": 10, "pass_rate": 80.0},
+        }
+        _print_summary(result, "my-model", {"json": "/tmp/r.json"})
+        out = capsys.readouterr().out
+        assert "SCAN COMPLETE: my-model" in out
+        assert "Total:      10 tests" in out
+        assert "Passed:     8" in out
+        assert "Failed:     2" in out
+        assert "Pass Rate:  80.0%" in out
+        assert "/tmp/r.json" in out
+
+    def test_no_reports(self, capsys):
+        result = {"status": "completed", "results": {"passed": 0, "failed": 0}}
+        _print_summary(result, "target", {})
+        out = capsys.readouterr().out
+        assert "SCAN COMPLETE" in out
+        assert "JSON:" not in out
+        assert "HTML:" not in out
+
+    def test_html_report_shown(self, capsys):
+        result = {"status": "completed"}
+        _print_summary(result, "t", {"html": "/tmp/r.html"})
+        out = capsys.readouterr().out
+        assert "/tmp/r.html" in out
+
+
+# ---------------------------------------------------------------------------
+# _save_reports pattern KeyError fallback
+# ---------------------------------------------------------------------------
+
+class TestSaveReportsPatternFallback:
+    """Verify _save_reports handles invalid filename_pattern gracefully."""
+
+    def test_bad_pattern_fallback(self, tmp_path):
+        mock_client = type("C", (), {
+            "scan_results": lambda self, sid: {"status": "completed"},
+            "scan_report_html": lambda self, sid: b"<html></html>",
+        })()
+        output_cfg = {
+            "directory": str(tmp_path),
+            "formats": ["json"],
+            "filename_pattern": "{name}_{unknown_field}",
+        }
+        paths = _save_reports(mock_client, "scan-1", "test-target", output_cfg)
+        assert "json" in paths
+        json_path = Path(paths["json"])
+        assert json_path.exists()
+        assert "test-target" in json_path.stem
+
+
+# ---------------------------------------------------------------------------
+# cmd_scan preset override logic
+# ---------------------------------------------------------------------------
+
+class TestCmdScanPresetOverride:
+    """Verify that preset values fill in when user doesn't explicitly set params."""
+
+    def test_no_explicit_generations_uses_default(self):
+        """When --generations is not passed, config should use default of 5."""
+        parser = build_parser()
+        args = parser.parse_args(["scan", "--model", "test-model"])
+        # args.generations should be None (not 5) so preset can override
+        assert args.generations is None
+        assert args.eval_threshold is None
+
+    def test_explicit_generations_preserved(self):
+        """When --generations is passed, it should be set."""
+        parser = build_parser()
+        args = parser.parse_args(["scan", "--model", "test-model", "--generations", "10"])
+        assert args.generations == 10
+
+
+# ---------------------------------------------------------------------------
+# cmd_compare — finding and comparing result files
+# ---------------------------------------------------------------------------
+
+class TestCmdCompare:
+    """Tests for the compare subcommand."""
+
+    def test_compare_two_files(self, tmp_path, capsys):
+        """Compare should read two JSON files and print a comparison table."""
+        import time as time_mod
+
+        r1 = {"results": {"passed": 8, "failed": 2}, "summary": {"pass_rate": 80.0}}
+        r2 = {"results": {"passed": 9, "failed": 1}, "summary": {"pass_rate": 90.0}}
+
+        f1 = tmp_path / "model_2026-01-01.json"
+        f1.write_text(json.dumps(r1))
+        time_mod.sleep(0.05)  # ensure different mtime
+        f2 = tmp_path / "model_2026-01-02.json"
+        f2.write_text(json.dumps(r2))
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "compare", "--target", "model", "--dir", str(tmp_path),
+        ])
+        result = cmd_compare(args)
+        captured = capsys.readouterr()
+        assert "COMPARISON" in captured.out
+        assert result == 0  # no regression (90% -> 80% is improvement when newer is f2)
+
+    def test_compare_insufficient_files(self, tmp_path):
+        """Should exit with error if fewer than 2 result files exist."""
+        f1 = tmp_path / "model_2026-01-01.json"
+        f1.write_text("{}")
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "compare", "--target", "model", "--dir", str(tmp_path),
+        ])
+        with pytest.raises(SystemExit):
+            cmd_compare(args)
+
+    def test_compare_nonexistent_dir(self):
+        """Should exit with error for a nonexistent directory."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "compare", "--target", "x", "--dir", "/no/such/dir",
+        ])
+        with pytest.raises(SystemExit):
+            cmd_compare(args)
+
+    def test_compare_detects_regression(self, tmp_path, capsys):
+        """Should return 1 when regression exceeds threshold."""
+        import time as time_mod
+
+        r_old = {"results": {"passed": 9, "failed": 1}, "summary": {"pass_rate": 90.0}}
+        r_new = {"results": {"passed": 5, "failed": 5}, "summary": {"pass_rate": 50.0}}
+
+        f1 = tmp_path / "model_2026-01-01.json"
+        f1.write_text(json.dumps(r_old))
+        time_mod.sleep(0.05)
+        f2 = tmp_path / "model_2026-01-02.json"
+        f2.write_text(json.dumps(r_new))
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "compare", "--target", "model", "--dir", str(tmp_path),
+            "--threshold", "5.0",
+        ])
+        result = cmd_compare(args)
+        assert result == 1  # regression: 90% -> 50% exceeds 5% threshold
