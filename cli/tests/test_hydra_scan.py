@@ -4,6 +4,7 @@ Tests for cli/hydra_scan.py — CLI argument parsing and offline subcommands.
 Covers T4.3-T4.6 and T4.14 from the test plan (commands that don't need a running backend).
 Also covers success criteria S5, S6, S12, S13, S14, S15, S16, S19, S21.
 """
+import contextlib
 import os
 import sys
 import subprocess
@@ -22,6 +23,52 @@ from hydra_scan import (
     _load_and_validate_plan, _print_summary, HydraClient,
 )
 from comparator import extract_counts
+
+
+# ---------------------------------------------------------------------------
+# Shared test helpers
+# ---------------------------------------------------------------------------
+
+def _make_mock_client(
+    scan_results=None,
+    scan_id="test-id",
+    preset_available=False,
+):
+    """Create a pre-configured MagicMock HydraClient for scan tests.
+
+    Args:
+        scan_results: Dict to return from scan_results(). If None, uses a
+            default with 5 passed / 0 failed.
+        scan_id: The scan_id returned by start_scan().
+        preset_available: If False, get_preset raises SystemExit (preset
+            not found). If True, returns an empty preset config.
+    """
+    client = MagicMock()
+    client.start_scan.return_value = {"scan_id": scan_id}
+    client.scan_results.return_value = scan_results or {
+        "status": "completed",
+        "results": {"passed": 5, "failed": 0},
+        "summary": {"total_tests": 5, "pass_rate": 100.0},
+    }
+    if not preset_available:
+        client.get_preset.side_effect = SystemExit(1)
+    else:
+        client.get_preset.return_value = {"config": {}}
+    return client
+
+
+@contextlib.contextmanager
+def _patched_scan(mock_client, final_status=None, saved_reports=None):
+    """Context manager that patches HydraClient, progress monitor, and
+    report saving so that ``cmd_run`` / ``cmd_scan`` can execute without a
+    real backend.
+    """
+    with patch("hydra_scan.HydraClient", return_value=mock_client), \
+         patch("hydra_scan._monitor_progress_ws",
+               return_value=final_status or {"status": "completed"}), \
+         patch("hydra_scan._save_reports",
+               return_value=saved_reports or {"json": "/tmp/r.json"}):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -436,47 +483,26 @@ class TestExitCodePolicy:
 
     def test_cmd_scan_returns_1_on_failures(self):
         """cmd_scan should return exit code 1 when probe failures are detected."""
-        from hydra_scan import cmd_scan
-
-        # Mock the HydraClient
-        mock_client = MagicMock()
-        mock_client.start_scan.return_value = {"scan_id": "test-scan-id"}
-        mock_client.scan_results.return_value = {
+        client = _make_mock_client(scan_results={
             "status": "completed",
             "results": {"passed": 0, "failed": 2},
             "summary": {"total_tests": 2, "pass_rate": 0.0},
-        }
-
+        })
         parser = build_parser()
         args = parser.parse_args(["scan", "--model", "test-model", "--probes", "dan.Dan_11_0"])
 
-        with patch("hydra_scan.HydraClient", return_value=mock_client), \
-             patch("hydra_scan._monitor_progress_ws", return_value={"status": "completed"}), \
-             patch("hydra_scan._save_reports", return_value={"json": "/tmp/r.json"}):
+        with _patched_scan(client):
             result = cmd_scan(args)
-
-        assert result == 1  # failures detected
+        assert result == 1
 
     def test_cmd_scan_returns_0_on_all_pass(self):
         """cmd_scan should return 0 when all tests pass."""
-        from hydra_scan import cmd_scan
-
-        mock_client = MagicMock()
-        mock_client.start_scan.return_value = {"scan_id": "test-scan-id"}
-        mock_client.scan_results.return_value = {
-            "status": "completed",
-            "results": {"passed": 5, "failed": 0},
-            "summary": {"total_tests": 5, "pass_rate": 100.0},
-        }
-
+        client = _make_mock_client()
         parser = build_parser()
         args = parser.parse_args(["scan", "--model", "test-model"])
 
-        with patch("hydra_scan.HydraClient", return_value=mock_client), \
-             patch("hydra_scan._monitor_progress_ws", return_value={"status": "completed"}), \
-             patch("hydra_scan._save_reports", return_value={"json": "/tmp/r.json"}):
+        with _patched_scan(client):
             result = cmd_scan(args)
-
         assert result == 0
 
     def test_exit_code_policy_never(self, tmp_path, capsys):
@@ -493,23 +519,16 @@ targets:
 automation:
   exit_code_policy: never
 """)
-        mock_client = MagicMock()
-        mock_client.get_preset.side_effect = SystemExit(1)
-        mock_client.start_scan.return_value = {"scan_id": "test-id"}
-        mock_client.scan_results.return_value = {
+        client = _make_mock_client(scan_results={
             "status": "completed",
             "results": {"passed": 0, "failed": 10},
             "summary": {"total_tests": 10, "pass_rate": 0.0},
-        }
-
+        })
         parser = build_parser()
         args = parser.parse_args(["run", "--plan", str(plan_file)])
 
-        with patch("hydra_scan.HydraClient", return_value=mock_client), \
-             patch("hydra_scan._monitor_progress_ws", return_value={"status": "completed"}), \
-             patch("hydra_scan._save_reports", return_value={"json": "/tmp/r.json"}):
+        with _patched_scan(client):
             result = cmd_run(args)
-
         assert result == 0  # never policy
 
     def test_exit_code_policy_threshold(self, tmp_path, capsys):
@@ -527,23 +546,16 @@ automation:
   exit_code_policy: threshold
   min_pass_rate: 80.0
 """)
-        mock_client = MagicMock()
-        mock_client.get_preset.side_effect = SystemExit(1)
-        mock_client.start_scan.return_value = {"scan_id": "test-id"}
-        mock_client.scan_results.return_value = {
+        client = _make_mock_client(scan_results={
             "status": "completed",
             "results": {"passed": 3, "failed": 7},
             "summary": {"total_tests": 10, "pass_rate": 30.0},
-        }
-
+        })
         parser = build_parser()
         args = parser.parse_args(["run", "--plan", str(plan_file)])
 
-        with patch("hydra_scan.HydraClient", return_value=mock_client), \
-             patch("hydra_scan._monitor_progress_ws", return_value={"status": "completed"}), \
-             patch("hydra_scan._save_reports", return_value={"json": "/tmp/r.json"}):
+        with _patched_scan(client):
             result = cmd_run(args)
-
         assert result == 1  # 30% < 80% threshold
 
     def test_exit_code_policy_threshold_passes(self, tmp_path, capsys):
@@ -561,23 +573,16 @@ automation:
   exit_code_policy: threshold
   min_pass_rate: 80.0
 """)
-        mock_client = MagicMock()
-        mock_client.get_preset.side_effect = SystemExit(1)
-        mock_client.start_scan.return_value = {"scan_id": "test-id"}
-        mock_client.scan_results.return_value = {
+        client = _make_mock_client(scan_results={
             "status": "completed",
             "results": {"passed": 9, "failed": 1},
             "summary": {"total_tests": 10, "pass_rate": 90.0},
-        }
-
+        })
         parser = build_parser()
         args = parser.parse_args(["run", "--plan", str(plan_file)])
 
-        with patch("hydra_scan.HydraClient", return_value=mock_client), \
-             patch("hydra_scan._monitor_progress_ws", return_value={"status": "completed"}), \
-             patch("hydra_scan._save_reports", return_value={"json": "/tmp/r.json"}):
+        with _patched_scan(client):
             result = cmd_run(args)
-
         assert result == 0  # 90% >= 80%
 
 
@@ -603,25 +608,14 @@ automation:
   quiet: true
   exit_code_policy: never
 """)
-        mock_client = MagicMock()
-        mock_client.get_preset.side_effect = SystemExit(1)
-        mock_client.start_scan.return_value = {"scan_id": "test-id"}
-        mock_client.scan_results.return_value = {
-            "status": "completed",
-            "results": {"passed": 5, "failed": 0},
-            "summary": {"total_tests": 5, "pass_rate": 100.0},
-        }
-
+        client = _make_mock_client()
         parser = build_parser()
         args = parser.parse_args(["run", "--plan", str(plan_file)])
 
-        with patch("hydra_scan.HydraClient", return_value=mock_client), \
-             patch("hydra_scan._monitor_progress_ws", return_value={"status": "completed"}), \
-             patch("hydra_scan._save_reports", return_value={"json": "/tmp/r.json"}):
+        with _patched_scan(client):
             cmd_run(args)
 
         out = capsys.readouterr().out
-        # Quiet mode should suppress "SCAN COMPLETE" banner
         assert "SCAN COMPLETE" not in out
 
     def test_json_stdout(self, tmp_path, capsys):
@@ -640,21 +634,15 @@ automation:
   json_stdout: true
   exit_code_policy: never
 """)
-        mock_client = MagicMock()
-        mock_client.get_preset.side_effect = SystemExit(1)
-        mock_client.start_scan.return_value = {"scan_id": "test-id"}
-        mock_client.scan_results.return_value = {
+        client = _make_mock_client(scan_results={
             "status": "completed",
             "results": {"passed": 3, "failed": 2},
             "summary": {"total_tests": 5, "pass_rate": 60.0},
-        }
-
+        })
         parser = build_parser()
         args = parser.parse_args(["run", "--plan", str(plan_file)])
 
-        with patch("hydra_scan.HydraClient", return_value=mock_client), \
-             patch("hydra_scan._monitor_progress_ws", return_value={"status": "completed"}), \
-             patch("hydra_scan._save_reports", return_value={"json": "/tmp/r.json"}):
+        with _patched_scan(client):
             cmd_run(args)
 
         out = capsys.readouterr().out
@@ -722,19 +710,15 @@ class TestErrorHandling:
 
     def test_scan_failed_status_exits_nonzero(self):
         """Scan that returns failed status produces exit code 1."""
-        from hydra_scan import cmd_scan
-
-        mock_client = MagicMock()
-        mock_client.start_scan.return_value = {"scan_id": "test-id"}
+        client = _make_mock_client()
 
         parser = build_parser()
         args = parser.parse_args(["scan", "--model", "m"])
 
-        with patch("hydra_scan.HydraClient", return_value=mock_client), \
-             patch("hydra_scan._monitor_progress_ws", return_value={
-                 "status": "failed",
-                 "error_message": "Model not found",
-             }):
+        with _patched_scan(client, final_status={
+            "status": "failed",
+            "error_message": "Model not found",
+        }):
             with pytest.raises(SystemExit):
                 cmd_scan(args)
 
