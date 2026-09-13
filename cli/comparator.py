@@ -110,25 +110,20 @@ def find_previous_result(
 # Extracting pass rates from result JSON
 # ---------------------------------------------------------------------------
 
-def _extract_pass_rate(result: dict) -> float:
-    """Extract overall pass rate from a scan result JSON.
+def extract_counts(result: dict) -> tuple:
+    """Extract passed/failed/total/pass_rate from a scan result dict.
 
     The backend API returns data in several possible locations:
-    - ``result["summary"]["pass_rate"]``
     - ``result["results"]["passed"]`` / ``result["results"]["failed"]``
-    - ``result["passed"]`` / ``result["failed"]``
+    - ``result["summary"]["total_tests"]`` / ``result["summary"]["pass_rate"]``
+    - ``result["passed"]`` / ``result["failed"]`` (top-level fallback)
+
+    Returns:
+        (passed, failed, total, pass_rate) where pass_rate is a percentage.
     """
-    # From summary.pass_rate (most direct)
-    summary = result.get("summary", {}) or {}
-    if summary.get("pass_rate") is not None:
-        return float(summary["pass_rate"])
-
-    # Direct pass_rate field
-    if result.get("pass_rate") is not None:
-        return float(result["pass_rate"])
-
-    # Calculate from passed/failed counts — check results sub-object first
     results = result.get("results", {}) or {}
+    summary = result.get("summary", {}) or {}
+
     passed = results.get("passed") if results.get("passed") is not None else result.get("passed")
     failed = results.get("failed") if results.get("failed") is not None else result.get("failed")
 
@@ -140,10 +135,18 @@ def _extract_pass_rate(result: dict) -> float:
     passed = passed or 0
     failed = failed or 0
 
-    total = passed + failed
-    if total == 0:
-        return 0.0
-    return (passed / total) * 100.0
+    total = summary.get("total_tests") or (passed + failed)
+
+    if summary.get("pass_rate") is not None:
+        pass_rate = float(summary["pass_rate"])
+    elif result.get("pass_rate") is not None:
+        pass_rate = float(result["pass_rate"])
+    elif total > 0:
+        pass_rate = (passed / total) * 100.0
+    else:
+        pass_rate = 0.0
+
+    return passed, failed, total, pass_rate
 
 
 def _extract_probe_rates(result: dict) -> Dict[str, float]:
@@ -265,8 +268,8 @@ def compare_results(
     with open(previous_path, "r", encoding="utf-8") as f:
         previous = json.load(f)
 
-    current_rate = _extract_pass_rate(current)
-    previous_rate = _extract_pass_rate(previous)
+    _, _, _, current_rate = extract_counts(current)
+    _, _, _, previous_rate = extract_counts(previous)
 
     current_date = _extract_date_from_filename(Path(current_path))
     previous_date = _extract_date_from_filename(Path(previous_path))

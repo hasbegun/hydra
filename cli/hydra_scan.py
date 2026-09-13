@@ -41,6 +41,7 @@ from plan_loader import (
 from comparator import (
     compare_results,
     check_regression,
+    extract_counts,
     find_previous_result,
     print_comparison,
 )
@@ -150,6 +151,26 @@ def _ensure_dir(path: str) -> Path:
 # Progress monitoring
 # ---------------------------------------------------------------------------
 
+_TERMINAL_STATES = frozenset(("completed", "failed", "cancelled"))
+_BAR_WIDTH = 20
+
+
+def _render_progress_line(data: dict) -> None:
+    """Render a single progress bar line to the terminal (in-place)."""
+    progress = data.get("progress", 0)
+    probe = data.get("current_probe", "")
+    passed = data.get("passed", 0)
+    failed = data.get("failed", 0)
+
+    filled = int(_BAR_WIDTH * progress / 100)
+    bar = "#" * filled + "-" * (_BAR_WIDTH - filled)
+    line = f"\r[{bar}] {progress:.1f}%"
+    if probe:
+        line += f" | Probe: {probe}"
+    line += f" | Pass: {passed} | Fail: {failed}"
+    print(line, end="", flush=True)
+
+
 def _monitor_progress_ws(client: HydraClient, scan_id: str, quiet: bool = False) -> dict:
     """Monitor scan progress via WebSocket, falling back to REST polling."""
     if ws_module is not None and not quiet:
@@ -175,26 +196,12 @@ def _monitor_ws(client: HydraClient, scan_id: str) -> dict:
         except json.JSONDecodeError:
             return
 
-        status = data.get("status", "")
-        progress = data.get("progress", 0)
-        probe = data.get("current_probe", "")
-        passed = data.get("passed", 0)
-        failed = data.get("failed", 0)
-
-        if status in ("completed", "failed", "cancelled"):
+        if data.get("status", "") in _TERMINAL_STATES:
             final_status = data
             ws_app.close()
             return
 
-        # Render progress line
-        bar_width = 20
-        filled = int(bar_width * progress / 100)
-        bar = "#" * filled + "-" * (bar_width - filled)
-        line = f"\r[{bar}] {progress:.1f}%"
-        if probe:
-            line += f" | Probe: {probe}"
-        line += f" | Pass: {passed} | Fail: {failed}"
-        print(line, end="", flush=True)
+        _render_progress_line(data)
 
     def on_error(ws_app, error):
         nonlocal final_status
@@ -222,23 +229,11 @@ def _monitor_rest(client: HydraClient, scan_id: str, quiet: bool = False) -> dic
     """REST polling fallback for progress monitoring."""
     while True:
         status = client.scan_status(scan_id)
-        state = status.get("status", "")
 
         if not quiet:
-            progress = status.get("progress", 0)
-            probe = status.get("current_probe", "")
-            passed = status.get("passed", 0)
-            failed = status.get("failed", 0)
-            bar_width = 20
-            filled = int(bar_width * progress / 100)
-            bar = "#" * filled + "-" * (bar_width - filled)
-            line = f"\r[{bar}] {progress:.1f}%"
-            if probe:
-                line += f" | Probe: {probe}"
-            line += f" | Pass: {passed} | Fail: {failed}"
-            print(line, end="", flush=True)
+            _render_progress_line(status)
 
-        if state in ("completed", "failed", "cancelled"):
+        if status.get("status", "") in _TERMINAL_STATES:
             if not quiet:
                 print()  # newline
             return status
@@ -315,44 +310,10 @@ def _save_reports(
 # Terminal summary
 # ---------------------------------------------------------------------------
 
-def _extract_counts(result: dict) -> tuple:
-    """Extract passed/failed/total/pass_rate from a scan result dict.
-
-    The backend returns data in several possible locations:
-    - ``result["results"]["passed"]`` / ``result["results"]["failed"]``
-    - ``result["summary"]["total_tests"]`` / ``result["summary"]["pass_rate"]``
-    - ``result["passed"]`` / ``result["failed"]`` (top-level fallback)
-    """
-    results = result.get("results", {}) or {}
-    summary = result.get("summary", {}) or {}
-
-    passed = results.get("passed") if results.get("passed") is not None else result.get("passed")
-    failed = results.get("failed") if results.get("failed") is not None else result.get("failed")
-
-    if passed is None:
-        passed = summary.get("passed", 0)
-    if failed is None:
-        failed = summary.get("failed", 0)
-
-    passed = passed or 0
-    failed = failed or 0
-
-    total = summary.get("total_tests") or (passed + failed)
-
-    if summary.get("pass_rate") is not None:
-        pass_rate = float(summary["pass_rate"])
-    elif total > 0:
-        pass_rate = (passed / total) * 100.0
-    else:
-        pass_rate = 0.0
-
-    return passed, failed, total, pass_rate
-
-
 def _print_summary(result: dict, target_name: str, paths: Dict[str, str]) -> None:
     """Print a compact scan summary to stdout."""
     status = result.get("status", "unknown")
-    passed, failed, total, pass_rate = _extract_counts(result)
+    passed, failed, total, pass_rate = extract_counts(result)
 
     print()
     print("=" * 60)
@@ -374,13 +335,14 @@ def _print_summary(result: dict, target_name: str, paths: Dict[str, str]) -> Non
 # Subcommand: run (plan-based scanning)
 # ---------------------------------------------------------------------------
 
-def cmd_run(args: argparse.Namespace) -> int:
-    """Execute a YAML scan plan."""
-    plan_path = args.plan
+def _load_and_validate_plan(path: str) -> Optional[dict]:
+    """Load and validate a YAML scan plan, printing errors on failure.
 
-    # Load and validate
+    Returns the parsed plan dict, or calls ``_error()`` / returns 1 on failure.
+    On validation errors, prints them to stderr and returns None.
+    """
     try:
-        plan = load_plan(plan_path)
+        plan = load_plan(path)
     except FileNotFoundError as exc:
         _error(str(exc))
     except ValueError as exc:
@@ -391,6 +353,15 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("Scan plan validation errors:", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
+        return None
+
+    return plan
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Execute a YAML scan plan."""
+    plan = _load_and_validate_plan(args.plan)
+    if plan is None:
         return 1
 
     plan_name = plan.get("name", "unnamed")
@@ -485,7 +456,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 _info("  No previous result found for comparison.", quiet)
 
         # Build result record for JSON stdout
-        passed, failed, total, pass_rate = _extract_counts(result)
+        passed, failed, total, pass_rate = extract_counts(result)
 
         target_result = {
             "name": target_name,
@@ -636,7 +607,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     result = client.scan_results(scan_id)
     _print_summary(result, target_name, paths)
 
-    _, failed, _, _ = _extract_counts(result)
+    _, failed, _, _ = extract_counts(result)
     return 1 if failed > 0 else 0
 
 
@@ -646,18 +617,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate a YAML scan plan."""
-    try:
-        plan = load_plan(args.plan)
-    except FileNotFoundError as exc:
-        _error(str(exc))
-    except ValueError as exc:
-        _error(str(exc))
-
-    errors = validate_plan(plan)
-    if errors:
-        print("Validation errors:")
-        for e in errors:
-            print(f"  - {e}")
+    plan = _load_and_validate_plan(args.plan)
+    if plan is None:
         return 1
 
     print(f"Plan is valid: {plan.get('name', 'unnamed')} ({len(plan.get('targets', []))} targets)")

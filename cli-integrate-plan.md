@@ -30,15 +30,15 @@ Add a Dockerized Python CLI tool with YAML-based scan plans, automated schedulin
 |-------|-------|--------|---------|
 | T1: Backend REST fields | 27 tests | PASS | `test_rest_target.py` — schema, command builder, generator_options mapping |
 | T2: Plan Loader | 35 tests | PASS | `test_plan_loader.py` — load, validate, merge, env vars, generator_options, body_template strip |
-| T3: Comparator | 20 tests | PASS | `test_comparator.py` — find, compare, threshold, print |
-| T4: CLI (offline) | 54 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help, defaults, overrides, exit codes, quiet/JSON, error handling, report saving, filename sanitization |
+| T3: Comparator | 27 tests | PASS | `test_comparator.py` — find, compare, threshold, print, extract_counts |
+| T4: CLI (offline) | 63 tests | PASS | `test_hydra_scan.py` — argparse, validate, init, dry-run, help, defaults, overrides, exit codes, quiet/JSON, error handling, report saving, filename sanitization, progress bar, plan loading |
 | T4: CLI (Docker integration) | 7 verified | PASS | --help, health, dry-run, validate, init, env vars, probes |
 | T4: CLI (E2E with Ollama) | 4 verified | PASS | T4.1 plan scan, T4.7 ad-hoc scan, T4.9 comparison, T5.3 Docker scan |
 | T4.2: Multi-target E2E | verified | PASS | 2 models (qwen2.5:1.5b, phi3:mini), sequential scan, separate reports |
 | T4.8: REST endpoint E2E | verified | PASS | Ollama OpenAI-compatible API via REST generator with JSONPath |
 | T5: Docker CLI | 3 verified | PASS | T5.1 --help, T5.2 health, T5.4 not in default compose |
-| T6: Regression | verified | PASS | 254 backend + 109 CLI tests pass (1 pre-existing failure unrelated) |
-| **Total** | **136 automated + 16 manual** | **ALL PASS** | 0 regressions |
+| T6: Regression | verified | PASS | 254 backend + 125 CLI tests pass (1 pre-existing failure unrelated) |
+| **Total** | **152 automated + 16 manual** | **ALL PASS** | 0 regressions |
 
 ### Phase 3 Bug Fixes (found during E2E testing)
 
@@ -75,6 +75,21 @@ Full code audit of all CLI modules, backend changes, Docker config:
 - **Redundant imports cleanup**: Removed `from pathlib import Path as P` and `import re` inside `cmd_compare` (both already available at module level).
 - **Security audit passed**: `yaml.safe_load` used (no arbitrary code execution), no secrets in code, explicit file encoding, env vars resolved at runtime not stored in YAML.
 - 7 new tests for filename sanitization covering path traversal, special characters, empty strings, null bytes, and end-to-end report saving with malicious names.
+
+### Phase 7: Code Deduplication & Refactoring
+
+Systematic refactoring to eliminate all identified code duplication across CLI modules:
+
+**Duplication 1 — Result extraction** (`hydra_scan._extract_counts` + `comparator._extract_pass_rate`):
+- Both functions parsed the same nested result structure with identical fallback logic. Consolidated into a single `extract_counts()` function in `comparator.py` (the canonical "result analysis" module). `hydra_scan.py` now imports `extract_counts` from `comparator` instead of defining its own duplicate. Removed 34 lines of duplicated code.
+
+**Duplication 2 — Progress bar rendering** (`_monitor_ws` + `_monitor_rest`):
+- Both monitor functions contained identical 7-line progress bar formatting code (bar width, hash/dash pattern, line format). Extracted into `_render_progress_line(data)` helper. Also extracted `_TERMINAL_STATES` frozenset and `_BAR_WIDTH` constant to eliminate magic values in two places. Removed 14 lines of duplicated code.
+
+**Duplication 3 — Plan loading error handling** (`cmd_run` + `cmd_validate`):
+- Both commands had identical try/except blocks for `load_plan()` + `validate_plan()` with error printing. Extracted into `_load_and_validate_plan(path)` which returns the plan dict or None on validation failure (and calls `_error()` on I/O errors). Both commands now call this single helper. Removed 15 lines of duplicated code.
+
+**16 new tests** covering refactored code: `extract_counts` (7 tests in comparator), `_render_progress_line` (5 tests), `_load_and_validate_plan` (4 tests).
 
 ### Remaining
 
@@ -1150,9 +1165,9 @@ PyYAML>=6.0,<7.0
 
 | File | Description | Lines |
 |------|-------------|-------|
-| `cli/hydra_scan.py` | Main CLI tool | 976 |
+| `cli/hydra_scan.py` | Main CLI tool | 979 |
 | `cli/plan_loader.py` | YAML plan parser, validator, env var resolver | 342 |
-| `cli/comparator.py` | Result comparison engine | 326 |
+| `cli/comparator.py` | Result comparison engine + shared extract_counts | 379 |
 | `cli/requirements.txt` | `requests`, `websocket-client`, `PyYAML` | 3 |
 | `cli/README.md` | Full documentation | 236 |
 | `cli/scan_plans/examples/quick-ollama.yaml` | Minimal example | 9 |
@@ -1162,8 +1177,8 @@ PyYAML>=6.0,<7.0
 | `backend/Dockerfile.cli` | CLI Docker image | 28 |
 | `backend/tests/test_rest_target.py` | Backend REST field tests | 417 |
 | `cli/tests/test_plan_loader.py` | Plan loader tests | 499 |
-| `cli/tests/test_comparator.py` | Comparator tests | 330 |
-| `cli/tests/test_hydra_scan.py` | CLI tool tests | 874 |
+| `cli/tests/test_comparator.py` | Comparator + extract_counts tests | 385 |
+| `cli/tests/test_hydra_scan.py` | CLI tool tests | 963 |
 
 ### Modified Files (5) [ALL DONE]
 

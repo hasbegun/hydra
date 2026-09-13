@@ -17,9 +17,11 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from hydra_scan import (
-    build_parser, cmd_validate, cmd_init, _dry_run, _extract_counts,
-    _save_reports, _sanitize_filename, HydraClient,
+    build_parser, cmd_validate, cmd_init, _dry_run,
+    _save_reports, _sanitize_filename, _render_progress_line,
+    _load_and_validate_plan, HydraClient,
 )
+from comparator import extract_counts
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +134,8 @@ targets:
         result = cmd_validate(args)
         assert result == 1
         captured = capsys.readouterr()
-        assert "error" in captured.out.lower() or "Error" in captured.out
+        output = captured.out + captured.err
+        assert "error" in output.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -384,35 +387,35 @@ targets:
 
 
 # ---------------------------------------------------------------------------
-# _extract_counts unit tests
+# extract_counts unit tests
 # ---------------------------------------------------------------------------
 
 class TestExtractCounts:
-    """Test _extract_counts with various backend response formats."""
+    """Test extract_counts with various backend response formats."""
 
     def test_results_nested(self):
         result = {
             "results": {"passed": 8, "failed": 2},
             "summary": {"total_tests": 10, "pass_rate": 80.0},
         }
-        p, f, t, r = _extract_counts(result)
+        p, f, t, r = extract_counts(result)
         assert (p, f, t) == (8, 2, 10)
         assert r == 80.0
 
     def test_top_level_fallback(self):
         result = {"passed": 5, "failed": 3}
-        p, f, t, r = _extract_counts(result)
+        p, f, t, r = extract_counts(result)
         assert (p, f, t) == (5, 3, 8)
         assert abs(r - 62.5) < 0.1
 
     def test_empty_result(self):
         result = {}
-        p, f, t, r = _extract_counts(result)
+        p, f, t, r = extract_counts(result)
         assert (p, f, t, r) == (0, 0, 0, 0.0)
 
     def test_none_values(self):
         result = {"results": None, "summary": None}
-        p, f, t, r = _extract_counts(result)
+        p, f, t, r = extract_counts(result)
         assert (p, f, t, r) == (0, 0, 0, 0.0)
 
     def test_summary_pass_rate_used(self):
@@ -420,7 +423,7 @@ class TestExtractCounts:
             "results": {"passed": 9, "failed": 1},
             "summary": {"total_tests": 10, "pass_rate": 90.0},
         }
-        _, _, _, r = _extract_counts(result)
+        _, _, _, r = extract_counts(result)
         assert r == 90.0  # Uses summary.pass_rate
 
 
@@ -872,3 +875,89 @@ class TestFilenameSanitization:
         assert json_path.parent == tmp_path
         assert "/" not in json_path.name
         assert ".." not in json_path.name
+
+
+# ---------------------------------------------------------------------------
+# _render_progress_line (refactored progress bar)
+# ---------------------------------------------------------------------------
+
+class TestRenderProgressLine:
+    """Verify the extracted progress bar rendering helper."""
+
+    def test_basic_rendering(self, capsys):
+        _render_progress_line({"progress": 50.0, "passed": 3, "failed": 1})
+        out = capsys.readouterr().out
+        assert "50.0%" in out
+        assert "Pass: 3" in out
+        assert "Fail: 1" in out
+
+    def test_with_probe_name(self, capsys):
+        _render_progress_line({
+            "progress": 75.0,
+            "current_probe": "dan.Dan_11_0",
+            "passed": 10,
+            "failed": 2,
+        })
+        out = capsys.readouterr().out
+        assert "75.0%" in out
+        assert "dan.Dan_11_0" in out
+
+    def test_zero_progress(self, capsys):
+        _render_progress_line({"progress": 0})
+        out = capsys.readouterr().out
+        assert "0.0%" in out
+        # Bar should be all dashes at 0%
+        assert "--------------------" in out
+
+    def test_full_progress(self, capsys):
+        _render_progress_line({"progress": 100})
+        out = capsys.readouterr().out
+        assert "100.0%" in out
+        # Bar should be all hashes at 100%
+        assert "####################" in out
+
+    def test_empty_data(self, capsys):
+        """Should not crash on empty data dict."""
+        _render_progress_line({})
+        out = capsys.readouterr().out
+        assert "0.0%" in out
+
+
+# ---------------------------------------------------------------------------
+# _load_and_validate_plan (refactored plan loading)
+# ---------------------------------------------------------------------------
+
+class TestLoadAndValidatePlan:
+    """Verify the extracted plan loading and validation helper."""
+
+    def test_valid_plan(self, tmp_path):
+        plan_file = tmp_path / "good.yaml"
+        plan_file.write_text("""
+name: test
+targets:
+  - name: t
+    type: ollama
+    model: m
+""")
+        plan = _load_and_validate_plan(str(plan_file))
+        assert plan is not None
+        assert plan["name"] == "test"
+
+    def test_invalid_plan_returns_none(self, tmp_path):
+        plan_file = tmp_path / "bad.yaml"
+        plan_file.write_text("""
+targets:
+  - type: ollama
+""")
+        plan = _load_and_validate_plan(str(plan_file))
+        assert plan is None
+
+    def test_nonexistent_file(self):
+        with pytest.raises(SystemExit):
+            _load_and_validate_plan("/no/such/file.yaml")
+
+    def test_empty_yaml(self, tmp_path):
+        plan_file = tmp_path / "empty.yaml"
+        plan_file.write_text("")
+        with pytest.raises(SystemExit):
+            _load_and_validate_plan(str(plan_file))

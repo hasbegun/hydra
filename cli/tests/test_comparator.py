@@ -19,6 +19,7 @@ from comparator import (
     ProbeComparison,
     check_regression,
     compare_results,
+    extract_counts,
     find_previous_result,
     print_comparison,
 )
@@ -328,3 +329,57 @@ class TestDataClasses:
         assert comp.regressions[0].probe_name == "dan"
         assert comp.overall_delta == -10.0
         assert comp.overall_label == "REGRESSION"
+
+
+# ---------------------------------------------------------------------------
+# extract_counts — shared result extraction
+# ---------------------------------------------------------------------------
+
+class TestExtractCounts:
+    """Tests for the canonical extract_counts function."""
+
+    def test_from_results_nested(self):
+        result = {
+            "results": {"passed": 8, "failed": 2},
+            "summary": {"total_tests": 10, "pass_rate": 80.0},
+        }
+        p, f, t, r = extract_counts(result)
+        assert (p, f, t) == (8, 2, 10)
+        assert r == 80.0
+
+    def test_from_top_level(self):
+        result = {"passed": 5, "failed": 3}
+        p, f, t, r = extract_counts(result)
+        assert (p, f, t) == (5, 3, 8)
+        assert abs(r - 62.5) < 0.1
+
+    def test_empty_result(self):
+        p, f, t, r = extract_counts({})
+        assert (p, f, t, r) == (0, 0, 0, 0.0)
+
+    def test_none_sub_objects(self):
+        p, f, t, r = extract_counts({"results": None, "summary": None})
+        assert (p, f, t, r) == (0, 0, 0, 0.0)
+
+    def test_summary_pass_rate_takes_precedence(self):
+        result = {
+            "results": {"passed": 9, "failed": 1},
+            "summary": {"total_tests": 10, "pass_rate": 90.0},
+        }
+        _, _, _, r = extract_counts(result)
+        assert r == 90.0
+
+    def test_direct_pass_rate_field(self):
+        result = {"pass_rate": 75.0}
+        _, _, _, r = extract_counts(result)
+        assert r == 75.0
+
+    def test_results_preferred_over_top_level(self):
+        """results.passed takes precedence over top-level passed."""
+        result = {
+            "passed": 100,
+            "failed": 0,
+            "results": {"passed": 3, "failed": 7},
+        }
+        p, f, _, _ = extract_counts(result)
+        assert (p, f) == (3, 7)
