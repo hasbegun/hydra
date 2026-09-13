@@ -1,0 +1,31 @@
+cli/comparator.py
+  99dfa3997dfaafb7 113-114,118-122,124,138-149,271-272
+cli/tests/test_comparator.py
+  99dfa3997dfaafb7 22,332-385
+cli/tests/test_hydra_scan.py
+  99dfa3997dfaafb7 20-22,24,137-138,390,394,401,407,413,418,426,878-963
+cli-integrate-plan.md
+  99dfa3997dfaafb7 33-34,40-41,79-93,1168,1170,1180-1181
+cli/hydra_scan.py
+  99dfa3997dfaafb7 44,154-173,199,204,234-236,316,338-339,341-343,345,356-364,459,610,620-621
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "5fdd6f244bb3265b2c70e0b3e002e8ba684c3e70",
+  "prompts": {
+    "99dfa3997dfaafb7": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "polarized-plane",
+        "model": "unknown"
+      },
+      "human_author": "Inho Choi",
+      "messages": [],
+      "total_additions": 245,
+      "total_deletions": 122,
+      "accepted_lines": 245,
+      "overriden_lines": 0
+    }
+  }
+}
