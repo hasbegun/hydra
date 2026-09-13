@@ -1,0 +1,25 @@
+cli/docs/TEST_GUIDE.md
+  99dfa3997dfaafb7 1-533
+cli/docs/USER_GUIDE.md
+  99dfa3997dfaafb7 1-694
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "891ae1a3c9685612cb5df8e28d8e60dad9dc1775",
+  "prompts": {
+    "99dfa3997dfaafb7": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "polarized-plane",
+        "model": "unknown"
+      },
+      "human_author": "Inho Choi",
+      "messages": [],
+      "total_additions": 1227,
+      "total_deletions": 0,
+      "accepted_lines": 1227,
+      "overriden_lines": 0
+    }
+  }
+}
