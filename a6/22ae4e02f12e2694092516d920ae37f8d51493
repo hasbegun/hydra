@@ -1,0 +1,23 @@
+cli-integrate-plan.md
+  99dfa3997dfaafb7 128-173,1244,1248-1249,1251-1252,1261,1275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "a622ae4e02f12e2694092516d920ae37f8d51493",
+  "prompts": {
+    "99dfa3997dfaafb7": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "polarized-plane",
+        "model": "unknown"
+      },
+      "human_author": "Inho Choi",
+      "messages": [],
+      "total_additions": 53,
+      "total_deletions": 5,
+      "accepted_lines": 53,
+      "overriden_lines": 0
+    }
+  }
+}
