@@ -125,6 +125,52 @@ Systematic audit of success criteria S1-S21 identified gaps in full-flow testing
 
 Also improved `_make_mock_client` helper to return proper `bytes` from `scan_report_html` so real `_save_reports` calls work in tests.
 
+### Phase 11: Documentation
+
+Created comprehensive user-facing and developer-facing documentation:
+- `cli/docs/USER_GUIDE.md` (694 lines) — prerequisites, installation, commands reference, YAML plan format, target types, presets, env vars, comparison, CI/CD automation, Docker usage, report formats, troubleshooting.
+- `cli/docs/TEST_GUIDE.md` (533 lines) — running tests, architecture, all 146 CLI tests documented by class, backend test suites, writing new tests, test helpers, E2E testing, troubleshooting.
+
+### Final Verification: Success Matrix
+
+Every criterion verified against automated tests + live Docker runs:
+
+| # | Criterion | Status | Evidence |
+|---|-----------|--------|----------|
+| S1 | YAML plan loads + dry run | **PASS** | 3 automated tests + live Docker dry run |
+| S2 | Ollama scan via plan | **PASS** | `test_plan_scan_saves_reports_and_prints_summary` + T4.1 E2E |
+| S3 | REST scan via plan | **PASS** | `test_ad_hoc_scan_with_rest_target` + T4.8 E2E |
+| S4 | Multi-target plan | **PASS** | `test_three_targets_dry_run` + `test_json_stdout_multi_target` + T4.2 E2E |
+| S5 | Default values work | **PASS** | `test_minimal_plan_loads` + `test_defaults_filled` |
+| S6 | Per-target override | **PASS** | 3 `test_target_overrides_defaults_*` tests + dry run test |
+| S7 | Env var substitution | **PASS** | 3 env var tests (resolve, unset error, multiple vars) |
+| S8 | Progress display | **PASS** | 5 `_render_progress_line` tests + live E2E |
+| S9 | JSON report correct | **PASS** | `test_save_reports_json_content` + `test_ad_hoc_scan_full_flow` |
+| S10 | HTML report renders | **PASS** | `_save_reports` writes HTML bytes + E2E reports opened |
+| S11 | Comparison works | **PASS** | `test_compare_two_files` + `test_plan_scan_with_comparison` + T4.9 E2E |
+| S12 | Exit code policy | **PASS** | 5 tests: `never`, `any_fail`, `threshold` (both directions) |
+| S13 | Quiet + JSON stdout | **PASS** | `test_quiet_mode` + `test_json_stdout` + `test_json_stdout_multi_target` |
+| S14 | Dry run | **PASS** | 3 automated tests + live Docker dry run |
+| S15 | Plan validation | **PASS** | 10+ validation tests + live Docker validate |
+| S16 | Plan generation | **PASS** | 4 init tests + live Docker init |
+| S17 | Docker CLI | **PASS** | T5.1-T5.4 verified live |
+| S18 | Ad-hoc scan | **PASS** | 4 `test_ad_hoc_scan_*` tests + T4.7 E2E |
+| S19 | Error handling | **PASS** | 5 error tests (connection, nonexistent plan, bad model, invalid JSON, failed status) |
+| S20 | No regression | **PASS** | 254 backend + 146 CLI = 400 pass, 1 pre-existing |
+| S21 | Cron-friendly | **PASS** | Quiet + JSON stdout tests cover unattended operation |
+
+### Final Verification: Test Plan Items
+
+| Group | Items | Status | Notes |
+|-------|-------|--------|-------|
+| T1 (Backend REST) | T1.1-T1.5 | **ALL PASS** | 27 tests; T1.3 updated for generator_options approach |
+| T2 (Plan Loader) | T2.1-T2.8 | **ALL PASS** | 35 tests |
+| T3 (Comparator) | T3.1-T3.5 | **ALL PASS** | 30 tests |
+| T4 (CLI E2E) | T4.1-T4.14 | **ALL PASS** | 81 automated + live Docker + E2E with Ollama |
+| T5 (Docker CLI) | T5.1-T5.4 | **ALL PASS** | Live Docker verification |
+| T6 (Regression) | T6.1-T6.2 | **PASS** | 254 backend tests, health verified |
+| T6 (Regression) | T6.3 | **BLOCKED** | Requires Flutter app (not in scope) |
+
 ### Remaining
 
 | ID | Test | Blocker |
@@ -1195,13 +1241,15 @@ PyYAML>=6.0,<7.0
 
 ## Files Created / Modified
 
-### New Files (14) [ALL CREATED]
+### New Files (16) [ALL CREATED]
 
 | File | Description | Lines |
 |------|-------------|-------|
-| `cli/hydra_scan.py` | Main CLI tool | 991 |
-| `cli/plan_loader.py` | YAML plan parser, validator, env var resolver | 342 |
+| `cli/hydra_scan.py` | Main CLI tool | 990 |
+| `cli/plan_loader.py` | YAML plan parser, validator, env var resolver | 346 |
 | `cli/comparator.py` | Result comparison engine + shared extract_counts | 379 |
+| `cli/docs/USER_GUIDE.md` | Comprehensive user guide | 694 |
+| `cli/docs/TEST_GUIDE.md` | Comprehensive test guide | 533 |
 | `cli/requirements.txt` | `requests`, `websocket-client`, `PyYAML` | 3 |
 | `cli/README.md` | Full documentation | 236 |
 | `cli/scan_plans/examples/quick-ollama.yaml` | Minimal example | 9 |
@@ -1210,7 +1258,7 @@ PyYAML>=6.0,<7.0
 | `cli/scan_plans/examples/ci-gate.yaml` | CI pipeline example | 27 |
 | `backend/Dockerfile.cli` | CLI Docker image | 28 |
 | `backend/tests/test_rest_target.py` | Backend REST field tests | 417 |
-| `cli/tests/test_plan_loader.py` | Plan loader tests | 499 |
+| `cli/tests/test_plan_loader.py` | Plan loader tests | 612 |
 | `cli/tests/test_comparator.py` | Comparator + extract_counts tests | 412 |
 | `cli/tests/test_hydra_scan.py` | CLI tool tests | 1398 |
 
@@ -1224,7 +1272,7 @@ PyYAML>=6.0,<7.0
 | `backend/docker-compose.dev.yml` | Dev mode CLI overrides | +11 |
 | `backend/Makefile` | `test-rest`, `test-cli-tool`, `test-all` targets | +24 |
 
-**Total: 22 files changed, 4730 insertions, 5 deletions.**
+**Total: 24 files changed, 5957 insertions, 5 deletions.**
 
 ---
 
