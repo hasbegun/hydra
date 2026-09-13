@@ -1,0 +1,59 @@
+cli/plan_loader.py
+  99dfa3997dfaafb7 1-342
+cli/scan_plans/examples/website-scan.yaml
+  99dfa3997dfaafb7 1-36
+cli/tests/test_plan_loader.py
+  99dfa3997dfaafb7 1-499
+cli/tests/test_comparator.py
+  99dfa3997dfaafb7 1-330
+cli/tests/test_hydra_scan.py
+  99dfa3997dfaafb7 1-251
+cli/requirements.txt
+  99dfa3997dfaafb7 1-3
+backend/models/schemas.py
+  99dfa3997dfaafb7 31,120-137
+backend/tests/test_rest_target.py
+  99dfa3997dfaafb7 1-417
+cli/comparator.py
+  99dfa3997dfaafb7 1-326
+cli/scan_plans/examples/quick-ollama.yaml
+  99dfa3997dfaafb7 1-9
+backend/docker-compose.yml
+  99dfa3997dfaafb7 138-158
+backend/Dockerfile.cli
+  99dfa3997dfaafb7 1-28
+cli/README.md
+  99dfa3997dfaafb7 1-236
+backend/docker-compose.dev.yml
+  99dfa3997dfaafb7 98-108
+cli/scan_plans/examples/ci-gate.yaml
+  99dfa3997dfaafb7 1-27
+backend/services/garak_service/scan_manager.py
+  99dfa3997dfaafb7 308-320
+cli/hydra_scan.py
+  99dfa3997dfaafb7 1-976
+backend/Makefile
+  99dfa3997dfaafb7 1,26-28,35-44,77,80-87
+cli/scan_plans/examples/weekly-audit.yaml
+  99dfa3997dfaafb7 1-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "31969f5774bf98bdac76ab1f3b7d2df31319a728",
+  "prompts": {
+    "99dfa3997dfaafb7": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "polarized-plane",
+        "model": "unknown"
+      },
+      "human_author": "Inho Choi",
+      "messages": [],
+      "total_additions": 3710,
+      "total_deletions": 17,
+      "accepted_lines": 3698,
+      "overriden_lines": 0
+    }
+  }
+}
