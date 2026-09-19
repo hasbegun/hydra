@@ -405,6 +405,17 @@ class TestBuildCommandCombined:
         assert "--continue_on_error" not in cmd
         assert "--extended_detectors" in cmd
 
+    def test_parallel_flags_not_passed_to_garak(self):
+        """parallel_attempts and parallel_requests must NOT be forwarded
+        to garak — they cause 'daemonic processes are not allowed to have
+        children' when the garak service runs inside uvicorn."""
+        cmd = self._build({
+            "parallel_attempts": 16,
+            "parallel_requests": 10,
+        })
+        assert "--parallel_attempts" not in cmd
+        assert "--parallel_requests" not in cmd
+
     def test_schema_to_command_roundtrip(self):
         """Validate schema -> dict -> command pipeline."""
         config = ScanConfigRequest(

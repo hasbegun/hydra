@@ -300,11 +300,13 @@ class ScanManager:
         if config.get("seed") is not None:
             cmd.extend(["--seed", str(config["seed"])])
 
-        if config.get("parallel_requests"):
-            cmd.extend(["--parallel_requests", str(config["parallel_requests"])])
-
-        if config.get("parallel_attempts"):
-            cmd.extend(["--parallel_attempts", str(config["parallel_attempts"])])
+        # NOTE: --parallel_requests and --parallel_attempts are intentionally
+        # NOT passed to garak.  The garak service runs inside a uvicorn worker
+        # subprocess (multiprocessing.spawn.Process), and garak's probe
+        # executor uses multiprocessing.Pool internally.  Combining the two
+        # triggers "daemonic processes are not allowed to have children".
+        # Garak's defaults (sequential execution) are safe and still fast
+        # for REST targets where the bottleneck is network latency.
 
         # Generator options with Ollama host injection and REST config
         generator_type = config["target_type"].split(".")[0].lower()
