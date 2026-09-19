@@ -64,11 +64,10 @@ targets:
     #   ConversationMode: bool       (false = single-turn)
     #   ResponseMode: string         ("Thoroughly" = full response)
     #   IsWidgetOrigin: bool         (false = direct chat)
+    # Cookie ($NEXUS_COOKIE) and User-Agent are injected automatically by the CLI.
     headers:
       Origin: "https://isioaiffwwebuat06.azurewebsites.net"
       Referer: "https://isioaiffwwebuat06.azurewebsites.net/"
-      User-Agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-      Cookie: "${NEXUS_COOKIE}"
     body_template: '{"ConversationId":0,"Prompt":"{\"user_input_content\":[{\"type\":\"text\",\"text\":\"$INPUT\"}]}","Username":"Inho.Choi@intusurg.com","ClientTime":"2026-01-01T00:00:00Z","ClientTimeZone":"America/Los_Angeles","ConversationMode":false,"ResponseMode":"Thoroughly","IsWidgetOrigin":false}'
     # Response JSON: the LLM response is at facts[0].content
     response_field: "$.facts[0].content"

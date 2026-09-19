@@ -201,11 +201,20 @@ def _resolve_auth_token(auth_cfg: dict, quiet: bool = False) -> Optional[str]:
     return None  # unreachable, _error exits
 
 
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/153.0.0.0 Safari/537.36"
+)
+
+
 def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
     """Inject the auth token into the scan config's REST headers.
 
-    Also ensures Content-Type is set, since garak's RestGenerator sends
-    the body via ``data=`` (not ``json=``) and doesn't auto-set the header.
+    Also injects:
+    - Content-Type (garak uses ``data=`` not ``json=``, so no auto header)
+    - Cookie from ``$NEXUS_COOKIE`` env var (Azure ARRAffinity session pinning)
+    - User-Agent default (some APIs validate this)
     """
     header_name = auth_cfg.get("token_header", "Authorization")
     token_prefix = auth_cfg.get("token_prefix", "Bearer ")
@@ -215,6 +224,15 @@ def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
     scan_config["rest_headers"][header_name] = f"{token_prefix}{token}"
     # Ensure Content-Type is set so the server knows the body is JSON
     scan_config["rest_headers"].setdefault("Content-Type", "application/json")
+
+    # Inject cookie from env var if not already set in the YAML headers
+    cookie_env = auth_cfg.get("cookie_env", "NEXUS_COOKIE")
+    cookie_val = os.environ.get(cookie_env, "")
+    if cookie_val and "Cookie" not in scan_config["rest_headers"]:
+        scan_config["rest_headers"]["Cookie"] = cookie_val
+
+    # Default User-Agent (some APIs reject requests without one)
+    scan_config["rest_headers"].setdefault("User-Agent", _DEFAULT_USER_AGENT)
 
 
 # ---------------------------------------------------------------------------
@@ -775,6 +793,11 @@ def cmd_scan(args: argparse.Namespace) -> int:
             config["rest_headers"] = {}
         config["rest_headers"]["Authorization"] = f"Bearer {token}"
         config["rest_headers"].setdefault("Content-Type", "application/json")
+        # Inject cookie and User-Agent (same as plan-based auth)
+        cookie_val = os.environ.get("NEXUS_COOKIE", "")
+        if cookie_val and "Cookie" not in config["rest_headers"]:
+            config["rest_headers"]["Cookie"] = cookie_val
+        config["rest_headers"].setdefault("User-Agent", _DEFAULT_USER_AGENT)
 
     # Fetch preset — fills in keys not already set by the user
     if args.preset:
