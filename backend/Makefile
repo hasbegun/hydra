@@ -272,6 +272,14 @@ scan: ## Run a scan plan (PLAN=path/to/plan.yaml)
 	$(CLI_RUN) run --plan $(PLAN)
 	@echo "$(GREEN)✓ Scan complete$(NC)"
 
+scan-bg: ## Run a scan plan in background (PLAN=path/to/plan.yaml) — survives terminal disconnect
+	@if [ -z "$(PLAN)" ]; then echo "$(RED)Error: PLAN is required. Usage: make scan-bg PLAN=scan_plans/my-plan.yaml$(NC)"; exit 1; fi
+	@echo "$(BLUE)Starting scan in background: $(PLAN)$(NC)"
+	@nohup $(CLI_RUN) run --plan $(PLAN) \
+		> scan-bg-$(shell date +%Y%m%d-%H%M%S).log 2>&1 &
+	@echo "$(GREEN)✓ Scan running in background (PID $$!)$(NC)"
+	@echo "$(YELLOW)  Log: tail -f $$(ls -t scan-bg-*.log | head -1)$(NC)"
+
 scan-dry: ## Dry run a scan plan — preview without scanning (PLAN=path/to/plan.yaml)
 	@if [ -z "$(PLAN)" ]; then echo "$(RED)Error: PLAN is required.$(NC)"; exit 1; fi
 	@echo "$(BLUE)Dry run: $(PLAN)$(NC)"
@@ -281,6 +289,8 @@ scan-validate: ## Validate a scan plan (PLAN=path/to/plan.yaml)
 	@if [ -z "$(PLAN)" ]; then echo "$(RED)Error: PLAN is required.$(NC)"; exit 1; fi
 	@echo "$(BLUE)Validating: $(PLAN)$(NC)"
 	$(CLI_RUN) validate --plan $(PLAN)
+
+NEXUS_LOG = nexus-scan-$(shell date +%Y%m%d-%H%M%S).log
 
 scan-nexus: ## Run Nexus chat app scan (requires OKTA_TOKEN env var)
 	@if [ -z "$$OKTA_TOKEN" ]; then \
@@ -294,6 +304,46 @@ scan-nexus: ## Run Nexus chat app scan (requires OKTA_TOKEN env var)
 	@echo "$(BLUE)Running Nexus scan (Okta auth)...$(NC)"
 	$(CLI_RUN) run --plan scan_plans/nexus-test.yaml
 	@echo "$(GREEN)✓ Nexus scan complete. Reports in cli_reports/nexus/$(NC)"
+
+scan-nexus-bg: ## Run Nexus scan in background (survives terminal disconnect)
+	@if [ -z "$$OKTA_TOKEN" ]; then \
+		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
+		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
+		echo "$(YELLOW)  2. Open DevTools > Network > copy the Authorization token$(NC)"; \
+		echo "$(YELLOW)  3. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
+		echo "$(YELLOW)  4. make scan-nexus-bg$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Starting Nexus scan in background...$(NC)"
+	@nohup $(CLI_RUN) run --plan scan_plans/nexus-test.yaml \
+		> $(NEXUS_LOG) 2>&1 &
+	@echo "$(GREEN)✓ Scan running in background (PID $$!)$(NC)"
+	@echo "$(YELLOW)  Log:    tail -f $(NEXUS_LOG)$(NC)"
+	@echo "$(YELLOW)  Status: make scan-nexus-status$(NC)"
+	@echo "$(YELLOW)  Stop:   make scan-nexus-stop$(NC)"
+
+scan-nexus-status: ## Check if a background Nexus scan is still running
+	@if pgrep -f "hydra_scan.py run --plan scan_plans/nexus-test" > /dev/null 2>&1; then \
+		echo "$(GREEN)Nexus scan is running (PID $$(pgrep -f 'hydra_scan.py run --plan scan_plans/nexus-test'))$(NC)"; \
+		echo "$(YELLOW)  Latest log lines:$(NC)"; \
+		tail -5 $$(ls -t nexus-scan-*.log 2>/dev/null | head -1) 2>/dev/null || echo "  (no log file found)"; \
+	else \
+		echo "$(YELLOW)No Nexus scan running.$(NC)"; \
+		LATEST=$$(ls -t nexus-scan-*.log 2>/dev/null | head -1); \
+		if [ -n "$$LATEST" ]; then \
+			echo "$(BLUE)Last log: $$LATEST$(NC)"; \
+			echo "$(YELLOW)  Last lines:$(NC)"; \
+			tail -10 "$$LATEST"; \
+		fi; \
+	fi
+
+scan-nexus-stop: ## Stop a running background Nexus scan
+	@if pgrep -f "hydra_scan.py run --plan scan_plans/nexus-test" > /dev/null 2>&1; then \
+		pkill -f "hydra_scan.py run --plan scan_plans/nexus-test"; \
+		echo "$(YELLOW)Nexus scan stopped.$(NC)"; \
+	else \
+		echo "$(YELLOW)No Nexus scan running.$(NC)"; \
+	fi
 
 scan-nexus-dry: ## Dry run Nexus scan — preview targets and auth status
 	@echo "$(BLUE)Dry run: Nexus scan$(NC)"
