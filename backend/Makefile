@@ -292,7 +292,20 @@ scan-validate: ## Validate a scan plan (PLAN=path/to/plan.yaml)
 
 NEXUS_LOG = nexus-scan-$(shell date +%Y%m%d-%H%M%S).log
 
-scan-nexus: ## Run Nexus chat app scan (requires OKTA_TOKEN env var)
+scan-nexus-quick: ## Quick Nexus smoke test (~5 min, 3 probes) — verify pipeline works
+	@if [ -z "$$OKTA_TOKEN" ]; then \
+		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
+		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
+		echo "$(YELLOW)  2. Open DevTools > Network > copy the Authorization token$(NC)"; \
+		echo "$(YELLOW)  3. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
+		echo "$(YELLOW)  4. make scan-nexus-quick$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Running Nexus quick smoke test (3 probes, ~5 min)...$(NC)"
+	$(CLI_RUN) run --plan scan_plans/nexus-quick.yaml
+	@echo "$(GREEN)✓ Quick scan complete. Reports in hydra_reports/nexus/$(NC)"
+
+scan-nexus: ## Run Nexus full scan (~30-60 min, requires OKTA_TOKEN env var)
 	@if [ -z "$$OKTA_TOKEN" ]; then \
 		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
 		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \

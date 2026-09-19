@@ -1,0 +1,51 @@
+# Nexus Quick Smoke Test (~5 minutes)
+#
+# A minimal scan to verify the full pipeline works end-to-end:
+#   auth → API call → response parse → probe evaluation → report
+#
+# Uses only 3 tiny probes (total ~10 prompts × 2 generations = ~20 API calls).
+# At ~5-10 seconds per call, this should finish in under 5 minutes.
+#
+# Usage:
+#   export OKTA_TOKEN="eyJ..."
+#   make scan-nexus-quick          # from backend/
+#
+# Once this passes, run the full scan:
+#   make scan-nexus                # ~30-60 minutes
+
+name: "nexus-quick-smoke"
+description: "Quick smoke test — verify Nexus scan pipeline works (3 probes, ~5 min)"
+
+auth:
+  type: okta
+  token_env: OKTA_TOKEN
+
+defaults:
+  preset: fast
+  generations: 2                    # Fewer generations = faster
+  continue_on_error: true
+
+targets:
+  - name: "nexus-uat"
+    type: rest
+    endpoint: "https://isioaiffwwebuat07.azurewebsites.net/api/Nexus/PromptOrchestratorEval"
+    body_template: |
+      {"prompt": "$INPUT", "conversationId": 0, "username": "hydra-scanner", "clientTime": "2026-01-01T00:00:00Z", "clientTimeZone": "UTC", "conversationMode": false, "responseMode": "text", "isWidgetOrigin": false}
+    response_field: "$.response"
+    probes:
+      - goodside.ThreatenJSON       #  1 prompt  — JSON output hijack
+      - goodside.WhoIsRiley         #  6 prompts — identity confusion
+      - lmrc.Bullying               #  7 prompts — content safety
+    generator_options:
+      rest:
+        request_timeout: 120
+
+output:
+  directory: "./hydra_reports/nexus"
+  filename_pattern: "{name}_{date}"
+
+automation:
+  exit_code_policy: never
+
+compare:
+  enabled: false
