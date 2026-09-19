@@ -1011,6 +1011,81 @@ class TestSaveReportsPatternFallback:
 
 
 # ---------------------------------------------------------------------------
+# Interim report saving
+# ---------------------------------------------------------------------------
+
+class TestInterimReports:
+    """Verify interim reports are saved during scan progress."""
+
+    def test_save_interim_report_creates_file(self, tmp_path):
+        from hydra_scan import _save_interim_report
+
+        mock_client = MagicMock()
+        mock_client.scan_results.return_value = {"partial": True}
+
+        output_cfg = {"directory": str(tmp_path)}
+        status = {"status": "running", "progress": 42.0, "passed": 3, "failed": 1}
+
+        path = _save_interim_report(mock_client, "scan-1", "my-target", output_cfg, status)
+        assert path is not None
+        assert Path(path).exists()
+        data = json.loads(Path(path).read_text())
+        assert data["status"] == "running"
+        assert data["progress"] == 42.0
+        assert data["passed"] == 3
+        assert data["failed"] == 1
+        assert data["target"] == "my-target"
+        assert "updated_at" in data
+
+    def test_interim_overwrites_previous(self, tmp_path):
+        from hydra_scan import _save_interim_report
+
+        mock_client = MagicMock()
+        mock_client.scan_results.return_value = {}
+
+        output_cfg = {"directory": str(tmp_path)}
+
+        _save_interim_report(mock_client, "s1", "tgt", output_cfg,
+                             {"progress": 10, "passed": 0, "failed": 0})
+        _save_interim_report(mock_client, "s1", "tgt", output_cfg,
+                             {"progress": 50, "passed": 5, "failed": 2})
+
+        from hydra_scan import _interim_report_path
+        data = json.loads(_interim_report_path("tgt", output_cfg).read_text())
+        assert data["progress"] == 50
+        assert data["passed"] == 5
+
+    def test_cleanup_interim_report(self, tmp_path):
+        from hydra_scan import _save_interim_report, _cleanup_interim_report, _interim_report_path
+
+        mock_client = MagicMock()
+        mock_client.scan_results.return_value = {}
+        output_cfg = {"directory": str(tmp_path)}
+
+        _save_interim_report(mock_client, "s1", "tgt", output_cfg,
+                             {"progress": 100, "passed": 10, "failed": 0})
+        assert _interim_report_path("tgt", output_cfg).exists()
+
+        _cleanup_interim_report("tgt", output_cfg)
+        assert not _interim_report_path("tgt", output_cfg).exists()
+
+    def test_interim_survives_results_api_failure(self, tmp_path):
+        from hydra_scan import _save_interim_report
+
+        mock_client = MagicMock()
+        mock_client.scan_results.side_effect = Exception("API down")
+
+        output_cfg = {"directory": str(tmp_path)}
+        status = {"status": "running", "progress": 25, "passed": 1, "failed": 0}
+
+        path = _save_interim_report(mock_client, "s1", "tgt", output_cfg, status)
+        assert path is not None
+        data = json.loads(Path(path).read_text())
+        # Falls back to status data when results API fails
+        assert data["progress"] == 25
+
+
+# ---------------------------------------------------------------------------
 # cmd_scan preset override logic
 # ---------------------------------------------------------------------------
 
@@ -1236,7 +1311,7 @@ automation:
         client = _make_mock_client()
 
         call_count = [0]
-        def mock_monitor(client_arg, scan_id, quiet=False):
+        def mock_monitor(client_arg, scan_id, quiet=False, **kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 return {"status": "failed", "error_message": "Model not found"}

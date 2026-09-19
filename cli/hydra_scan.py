@@ -54,6 +54,7 @@ DEFAULT_BACKEND_URL = os.environ.get("HYDRA_BACKEND_URL", "http://localhost:8888
 DEFAULT_OUTPUT_DIR = "./hydra_reports"
 POLL_INTERVAL_SECONDS = 3
 WS_TIMEOUT_SECONDS = 5
+INTERIM_REPORT_SECONDS = 60  # Save interim report every N seconds
 
 
 # ---------------------------------------------------------------------------
@@ -240,23 +241,35 @@ def _render_progress_line(data: dict) -> None:
     print(line, end="", flush=True)
 
 
-def _monitor_progress_ws(client: HydraClient, scan_id: str, quiet: bool = False) -> dict:
+def _monitor_progress_ws(
+    client: HydraClient,
+    scan_id: str,
+    quiet: bool = False,
+    target_name: str = "",
+    output_cfg: Optional[dict] = None,
+) -> dict:
     """Monitor scan progress via WebSocket, falling back to REST polling."""
     if ws_module is not None and not quiet:
         try:
-            return _monitor_ws(client, scan_id)
+            return _monitor_ws(client, scan_id, target_name, output_cfg)
         except Exception:
             pass  # fall through to REST polling
 
-    return _monitor_rest(client, scan_id, quiet)
+    return _monitor_rest(client, scan_id, quiet, target_name, output_cfg)
 
 
-def _monitor_ws(client: HydraClient, scan_id: str) -> dict:
-    """WebSocket progress monitoring."""
+def _monitor_ws(
+    client: HydraClient,
+    scan_id: str,
+    target_name: str = "",
+    output_cfg: Optional[dict] = None,
+) -> dict:
+    """WebSocket progress monitoring with interim report saving."""
     ws_url = client.base_url.replace("http://", "ws://").replace("https://", "wss://")
     ws_url = f"{ws_url}/api/v1/scan/{scan_id}/progress"
 
     final_status = None
+    last_interim_save = [0.0]  # mutable for closure access
 
     def on_message(ws_app, message):
         nonlocal final_status
@@ -271,6 +284,13 @@ def _monitor_ws(client: HydraClient, scan_id: str) -> dict:
             return
 
         _render_progress_line(data)
+
+        # Save interim report periodically
+        if output_cfg and target_name:
+            now = time.time()
+            if now - last_interim_save[0] >= INTERIM_REPORT_SECONDS:
+                _save_interim_report(client, scan_id, target_name, output_cfg, data)
+                last_interim_save[0] = now
 
     def on_error(ws_app, error):
         nonlocal final_status
@@ -294,8 +314,16 @@ def _monitor_ws(client: HydraClient, scan_id: str) -> dict:
     return client.scan_status(scan_id)
 
 
-def _monitor_rest(client: HydraClient, scan_id: str, quiet: bool = False) -> dict:
-    """REST polling fallback for progress monitoring."""
+def _monitor_rest(
+    client: HydraClient,
+    scan_id: str,
+    quiet: bool = False,
+    target_name: str = "",
+    output_cfg: Optional[dict] = None,
+) -> dict:
+    """REST polling fallback for progress monitoring with interim reports."""
+    last_interim_save = 0.0
+
     while True:
         status = client.scan_status(scan_id)
 
@@ -306,6 +334,13 @@ def _monitor_rest(client: HydraClient, scan_id: str, quiet: bool = False) -> dic
             if not quiet:
                 print()  # newline
             return status
+
+        # Save interim report periodically
+        if output_cfg and target_name:
+            now = time.time()
+            if now - last_interim_save >= INTERIM_REPORT_SECONDS:
+                _save_interim_report(client, scan_id, target_name, output_cfg, status)
+                last_interim_save = now
 
         time.sleep(POLL_INTERVAL_SECONDS)
 
@@ -327,6 +362,61 @@ def _sanitize_filename(name: str) -> str:
     # Collapse runs of underscores
     safe = re.sub(r"_+", "_", safe).strip("_.")
     return safe or "unnamed"
+
+
+def _interim_report_path(target_name: str, output_cfg: dict) -> Path:
+    """Return the path used for interim (in-progress) JSON reports."""
+    out_dir = _ensure_dir(output_cfg.get("directory", DEFAULT_OUTPUT_DIR))
+    safe_name = _sanitize_filename(target_name)
+    return out_dir / f"{safe_name}_interim.json"
+
+
+def _save_interim_report(
+    client: HydraClient,
+    scan_id: str,
+    target_name: str,
+    output_cfg: dict,
+    status: dict,
+) -> Optional[str]:
+    """Save a snapshot of current scan results while the scan is running.
+
+    Overwrites the same interim file each time so there is always a
+    recent snapshot on disk even if the terminal dies.  Returns the
+    path on success, None on error.
+    """
+    interim_path = _interim_report_path(target_name, output_cfg)
+    try:
+        results = client.scan_results(scan_id)
+    except (SystemExit, Exception):
+        # Results may not be available yet — write what we have from status
+        results = status
+
+    snapshot = {
+        "scan_id": scan_id,
+        "target": target_name,
+        "status": status.get("status", "running"),
+        "progress": status.get("progress", 0),
+        "passed": status.get("passed", 0),
+        "failed": status.get("failed", 0),
+        "current_probe": status.get("current_probe"),
+        "updated_at": datetime.datetime.now().isoformat(),
+        "results": results,
+    }
+    try:
+        with open(interim_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2, default=str)
+        return str(interim_path)
+    except OSError:
+        return None
+
+
+def _cleanup_interim_report(target_name: str, output_cfg: dict) -> None:
+    """Remove the interim report file after final reports are saved."""
+    interim_path = _interim_report_path(target_name, output_cfg)
+    try:
+        interim_path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _save_reports(
@@ -498,18 +588,24 @@ def cmd_run(args: argparse.Namespace) -> int:
         scan_id = resp.get("scan_id")
         _info(f"  Scan started: {scan_id}", quiet)
 
-        # Monitor progress
-        final_status = _monitor_progress_ws(client, scan_id, quiet)
+        # Monitor progress (saves interim reports every 30s)
+        final_status = _monitor_progress_ws(
+            client, scan_id, quiet,
+            target_name=target_name, output_cfg=output_cfg,
+        )
 
         status = final_status.get("status", "unknown")
         if status == "failed":
             error_msg = final_status.get("error_message", "Unknown error")
             print(f"  Scan failed: {error_msg}", file=sys.stderr)
+            # Save whatever results we have even on failure
+            _save_interim_report(client, scan_id, target_name, output_cfg, final_status)
             exit_code = 1
             continue
 
-        # Save reports
+        # Save final reports (replaces interim)
         paths = _save_reports(client, scan_id, target_name, output_cfg)
+        _cleanup_interim_report(target_name, output_cfg)
 
         # Get full results
         try:
