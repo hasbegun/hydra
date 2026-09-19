@@ -207,6 +207,27 @@ _DEFAULT_USER_AGENT = (
     "Chrome/153.0.0.0 Safari/537.36"
 )
 
+# Set-Cookie attributes that should be stripped from the Cookie request header.
+_COOKIE_ATTRS = frozenset({
+    "path", "domain", "expires", "max-age", "httponly", "secure", "samesite",
+})
+
+
+def _clean_cookie(raw: str) -> str:
+    """Strip Set-Cookie metadata, keeping only name=value pairs.
+
+    Users often paste the full Set-Cookie header:
+        ARRAffinity=abc123;Path=/;HttpOnly;Secure;Domain=example.com
+    This returns just: ARRAffinity=abc123
+    """
+    parts = [p.strip() for p in raw.split(";")]
+    kept = []
+    for part in parts:
+        key = part.split("=", 1)[0].strip().lower()
+        if key not in _COOKIE_ATTRS:
+            kept.append(part)
+    return "; ".join(kept)
+
 
 def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
     """Inject the auth token into the scan config's REST headers.
@@ -225,11 +246,14 @@ def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
     # Ensure Content-Type is set so the server knows the body is JSON
     scan_config["rest_headers"].setdefault("Content-Type", "application/json")
 
-    # Inject cookie from env var if not already set in the YAML headers
+    # Inject cookie from env var if not already set in the YAML headers.
+    # Users often paste the full Set-Cookie header value which includes
+    # metadata like "Path=/;HttpOnly;Secure;Domain=...".  Strip those —
+    # the Cookie request header only needs "name=value" pairs.
     cookie_env = auth_cfg.get("cookie_env", "NEXUS_COOKIE")
     cookie_val = os.environ.get(cookie_env, "")
     if cookie_val and "Cookie" not in scan_config["rest_headers"]:
-        scan_config["rest_headers"]["Cookie"] = cookie_val
+        scan_config["rest_headers"]["Cookie"] = _clean_cookie(cookie_val)
 
     # Default User-Agent (some APIs reject requests without one)
     scan_config["rest_headers"].setdefault("User-Agent", _DEFAULT_USER_AGENT)

@@ -21,7 +21,7 @@ from hydra_scan import (
     build_parser, cmd_validate, cmd_init, cmd_scan, cmd_compare, cmd_run,
     _dry_run, _save_reports, _sanitize_filename, _render_progress_line,
     _load_and_validate_plan, _print_summary, _resolve_auth_token,
-    _inject_auth_headers, HydraClient,
+    _inject_auth_headers, _clean_cookie, HydraClient,
 )
 from comparator import extract_counts
 
@@ -1624,6 +1624,42 @@ class TestInjectAuthHeaders:
         auth_cfg = {"type": "okta", "cookie_env": "MY_COOKIE"}
         _inject_auth_headers(config, auth_cfg, "tok")
         assert config["rest_headers"]["Cookie"] == "session=xyz"
+
+    def test_strips_set_cookie_metadata(self, monkeypatch):
+        """Full Set-Cookie header pasted into env should be cleaned."""
+        raw = "ARRAffinity=abc123;Path=/;HttpOnly;Secure;Domain=example.com"
+        monkeypatch.setenv("NEXUS_COOKIE", raw)
+        config = {}
+        _inject_auth_headers(config, {"type": "okta"}, "tok")
+        assert config["rest_headers"]["Cookie"] == "ARRAffinity=abc123"
+
+
+class TestCleanCookie:
+    """Test _clean_cookie strips Set-Cookie attributes."""
+
+    def test_strips_all_attributes(self):
+        raw = "ARRAffinity=abc;Path=/;HttpOnly;Secure;Domain=x.com;SameSite=None"
+        assert _clean_cookie(raw) == "ARRAffinity=abc"
+
+    def test_keeps_plain_cookie(self):
+        assert _clean_cookie("session=xyz") == "session=xyz"
+
+    def test_keeps_multiple_cookies(self):
+        raw = "a=1; b=2; Path=/; HttpOnly"
+        assert _clean_cookie(raw) == "a=1; b=2"
+
+    def test_handles_empty(self):
+        assert _clean_cookie("") == ""
+
+    def test_real_azure_cookie(self):
+        raw = ("ARRAffinity=205712c70cb93f8bb4599b8f873840c10ff4de7a685d6b1bab"
+               "7843d8593b8063;Path=/;HttpOnly;Secure;Domain=isioaiffwwebuat07"
+               ".azurewebsites.net")
+        result = _clean_cookie(raw)
+        assert result.startswith("ARRAffinity=205712c")
+        assert "Path" not in result
+        assert "HttpOnly" not in result
+        assert "Domain" not in result
 
 
 class TestAuthInDryRun:
