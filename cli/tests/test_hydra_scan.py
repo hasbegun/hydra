@@ -1448,6 +1448,30 @@ class TestResolveAuthToken:
         result = _resolve_auth_token({"type": "bearer", "token_env": "BEARER_TOK"})
         assert result == "bearer-val"
 
+    def test_strips_bearer_prefix_from_env_var(self, monkeypatch):
+        monkeypatch.setenv("TOK", "Bearer eyJabc123")
+        result = _resolve_auth_token({"type": "okta", "token_env": "TOK"})
+        assert result == "eyJabc123"
+
+    def test_strips_bearer_prefix_case_insensitive(self, monkeypatch):
+        monkeypatch.setenv("TOK", "bearer   eyJxyz")
+        result = _resolve_auth_token({"type": "okta", "token_env": "TOK"})
+        assert result == "eyJxyz"
+
+    def test_strips_bearer_prefix_from_refresh_command(self):
+        auth_cfg = {
+            "type": "okta",
+            "token_env": "FALLBACK",
+            "refresh_command": "echo 'Bearer fresh-token'",
+        }
+        result = _resolve_auth_token(auth_cfg)
+        assert result == "fresh-token"
+
+    def test_no_strip_when_no_bearer_prefix(self, monkeypatch):
+        monkeypatch.setenv("TOK", "eyJplaintoken")
+        result = _resolve_auth_token({"type": "okta", "token_env": "TOK"})
+        assert result == "eyJplaintoken"
+
     def test_no_token_env_and_no_refresh_exits(self):
         with pytest.raises(SystemExit):
             _resolve_auth_token({"type": "okta"})
@@ -1479,6 +1503,16 @@ class TestInjectAuthHeaders:
         auth_cfg = {"type": "okta", "token_prefix": "Token "}
         _inject_auth_headers(config, auth_cfg, "abc")
         assert config["rest_headers"]["Authorization"] == "Token abc"
+
+    def test_injects_content_type_when_missing(self):
+        config = {}
+        _inject_auth_headers(config, {"type": "okta"}, "tok")
+        assert config["rest_headers"]["Content-Type"] == "application/json"
+
+    def test_preserves_existing_content_type(self):
+        config = {"rest_headers": {"Content-Type": "text/plain"}}
+        _inject_auth_headers(config, {"type": "okta"}, "tok")
+        assert config["rest_headers"]["Content-Type"] == "text/plain"
 
 
 class TestAuthInDryRun:
@@ -1549,6 +1583,24 @@ class TestAuthInCmdScan:
 
         call_args = client.start_scan.call_args[0][0]
         assert call_args["rest_headers"]["Authorization"] == "Bearer my-okta-token"
+        assert call_args["rest_headers"]["Content-Type"] == "application/json"
+
+    def test_auth_token_strips_bearer_prefix(self):
+        client = _make_mock_client()
+        parser = build_parser()
+        args = parser.parse_args([
+            "scan", "--target-type", "rest",
+            "--rest-endpoint", "https://example.com/api",
+            "--rest-body-template", '{"msg": "$INPUT"}',
+            "--rest-response-field", "$.reply",
+            "--auth-token", "Bearer eyJsometoken",
+        ])
+
+        with _patched_scan(client):
+            cmd_scan(args)
+
+        call_args = client.start_scan.call_args[0][0]
+        assert call_args["rest_headers"]["Authorization"] == "Bearer eyJsometoken"
 
 
 class TestAuthInCmdRun:

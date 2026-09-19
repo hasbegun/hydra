@@ -170,6 +170,8 @@ def _resolve_auth_token(auth_cfg: dict, quiet: bool = False) -> Optional[str]:
             )
             if result.returncode == 0 and result.stdout.strip():
                 token = result.stdout.strip()
+                if token.lower().startswith("bearer "):
+                    token = token[7:].strip()
                 _info(f"  Auth: refreshed token via '{refresh_cmd}'", quiet)
                 return token
             else:
@@ -184,6 +186,9 @@ def _resolve_auth_token(auth_cfg: dict, quiet: bool = False) -> Optional[str]:
     if token_env:
         token = os.environ.get(token_env)
         if token:
+            # Strip "Bearer " prefix if the user pasted the full header value
+            if token.lower().startswith("bearer "):
+                token = token[7:].strip()
             _info(f"  Auth: using token from ${token_env}", quiet)
             return token
         _error(
@@ -196,13 +201,19 @@ def _resolve_auth_token(auth_cfg: dict, quiet: bool = False) -> Optional[str]:
 
 
 def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
-    """Inject the auth token into the scan config's REST headers."""
+    """Inject the auth token into the scan config's REST headers.
+
+    Also ensures Content-Type is set, since garak's RestGenerator sends
+    the body via ``data=`` (not ``json=``) and doesn't auto-set the header.
+    """
     header_name = auth_cfg.get("token_header", "Authorization")
     token_prefix = auth_cfg.get("token_prefix", "Bearer ")
 
     if "rest_headers" not in scan_config:
         scan_config["rest_headers"] = {}
     scan_config["rest_headers"][header_name] = f"{token_prefix}{token}"
+    # Ensure Content-Type is set so the server knows the body is JSON
+    scan_config["rest_headers"].setdefault("Content-Type", "application/json")
 
 
 # ---------------------------------------------------------------------------
@@ -661,9 +672,13 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
     # Inject auth token for REST targets
     if args.auth_token:
+        token = args.auth_token
+        if token.lower().startswith("bearer "):
+            token = token[7:].strip()
         if "rest_headers" not in config:
             config["rest_headers"] = {}
-        config["rest_headers"]["Authorization"] = f"Bearer {args.auth_token}"
+        config["rest_headers"]["Authorization"] = f"Bearer {token}"
+        config["rest_headers"].setdefault("Content-Type", "application/json")
 
     # Fetch preset — fills in keys not already set by the user
     if args.preset:
