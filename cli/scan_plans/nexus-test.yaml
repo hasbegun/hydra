@@ -1,15 +1,20 @@
 # Nexus Chat App Vulnerability Scan (Okta-Protected)
 #
+# Architecture (discovered via Swagger):
+#   Frontend SPA:  https://isioaiffwwebuat06.azurewebsites.net  (React, serves HTML)
+#   Backend API:   https://isioaiffwwebuat07.azurewebsites.net  (ASP.NET, Swagger at /swagger)
+#   Chat endpoint: POST /api/Nexus/PromptOrchestrator           (streaming)
+#   Eval endpoint: POST /api/Nexus/PromptOrchestratorEval       (non-streaming, used here)
+#
 # Usage:
 #   1. Log in to Nexus via Okta in your browser
-#   2. Open DevTools (F12) > Network tab > send a chat message
-#   3. Copy the access token from the Authorization header
-#   4. Export it:
+#   2. Open DevTools (F12) > Network tab > copy the Authorization Bearer token
+#   3. Export it:
 #        export OKTA_TOKEN="eyJ..."
-#   5. Run the scan:
-#        python hydra_scan.py run --plan scan_plans/nexus-test.yaml
-#   6. For dry run first:
-#        python hydra_scan.py run --plan scan_plans/nexus-test.yaml --dry-run
+#   4. Run the scan:
+#        make scan-nexus              # from backend/
+#   5. For dry run first:
+#        make scan-nexus-dry
 #
 # NOTE: Okta tokens expire after ~1 hour. The 'fast' preset completes
 #       in ~2 minutes, well within the token lifetime.
@@ -33,19 +38,26 @@ defaults:
 targets:
   - name: "nexus-uat"
     type: rest
-    # TODO: Update endpoint after inspecting DevTools network requests.
-    #       The root URL is unlikely to be the chat API. Look for
-    #       /api/chat, /api/v1/messages, /api/completions, etc.
-    endpoint: "https://isioaiffwwebuat06.azurewebsites.net/api/chat"
+    # Backend API is on *07*, NOT *06* (which is the frontend SPA).
+    # Using PromptOrchestratorEval (non-streaming) -- better for automated scanning.
+    endpoint: "https://isioaiffwwebuat07.azurewebsites.net/api/Nexus/PromptOrchestratorEval"
     # Auth header is injected automatically from the 'auth' section above.
     # Do NOT put ${OKTA_TOKEN} here -- the auth system handles it.
-    # TODO: Update body_template after inspecting the actual request body
-    #       from DevTools. The format below is a common pattern but may
-    #       differ for Nexus.
+    #
+    # Request body schema (from Swagger PromptOrchestratorRequest):
+    #   conversationId: int      (0 = new conversation)
+    #   prompt:         string   (the user message -- garak substitutes $INPUT)
+    #   username:       string   (required by server validation)
+    #   clientTime:     datetime (required format)
+    #   clientTimeZone: string   (required by server validation)
+    #   conversationMode: bool   (false = single-turn, no context)
+    #   responseMode:   string   (text output)
+    #   isWidgetOrigin: bool     (false = direct chat)
     body_template: |
-      {"message": "$INPUT", "stream": false}
-    # TODO: Update response_field after inspecting the actual response JSON.
-    #       Use JSONPath syntax: $.choices[0].message.content, $.response, etc.
+      {"prompt": "$INPUT", "conversationId": 0, "username": "hydra-scanner", "clientTime": "2026-01-01T00:00:00Z", "clientTimeZone": "UTC", "conversationMode": false, "responseMode": "text", "isWidgetOrigin": false}
+    # Response field -- adjust after seeing a successful response.
+    # Common patterns for this type of app: $.response, $.result, $.message, $.content
+    # If the response is plain text (not JSON), set response_json to false below.
     response_field: "$.response"
     probes:
       - dan
@@ -53,7 +65,9 @@ targets:
       - promptinject
     generator_options:
       rest:
-        request_timeout: 60       # Okta-protected apps can be slower
+        request_timeout: 120      # Chat completions can take 30-60s on complex prompts
+        # If the API returns plain text instead of JSON, uncomment:
+        # response_json: false
 
 output:
   directory: "./hydra_reports/nexus"
@@ -63,6 +77,6 @@ automation:
   exit_code_policy: never         # First run is exploratory, don't fail on findings
 
 compare:
-  enabled: true
+  enabled: false
   fail_on_regression: true
   regression_threshold: 3.0
