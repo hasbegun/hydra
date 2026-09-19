@@ -26,6 +26,8 @@ VALID_OUTPUT_FORMATS = {"json", "html", "summary"}
 
 VALID_PRESETS = {"fast", "default", "full", "owasp"}
 
+VALID_AUTH_TYPES = {"none", "okta", "bearer", "cookie"}
+
 # Fields that can appear at the target level to override defaults
 TARGET_OVERRIDE_FIELDS = {
     "preset",
@@ -195,6 +197,21 @@ def validate_plan(plan: dict) -> List[str]:
             errors.append(
                 f"automation.exit_code_policy: unknown policy '{policy}' "
                 f"(valid: {', '.join(sorted(VALID_EXIT_CODE_POLICIES))})"
+            )
+
+    # Validate auth section
+    auth = plan.get("auth", {})
+    if auth:
+        auth_type = auth.get("type", "none")
+        if auth_type not in VALID_AUTH_TYPES:
+            errors.append(
+                f"auth.type: unknown auth type '{auth_type}' "
+                f"(valid: {', '.join(sorted(VALID_AUTH_TYPES))})"
+            )
+        if auth_type in ("okta", "bearer") and not auth.get("token_env"):
+            errors.append(
+                f"auth.token_env: required when auth.type is '{auth_type}'. "
+                "Set to the environment variable name holding the access token."
             )
 
     return errors

@@ -610,3 +610,51 @@ targets:
         }
         configs = plan_to_scan_configs(plan)
         assert configs[0]["rest_body_template"] == '{"msg": "$INPUT"}'
+
+
+# ===================================================================
+# Auth section validation
+# ===================================================================
+
+class TestAuthValidation:
+    """Test plan_loader validates the auth section correctly."""
+
+    def _plan_with_auth(self, auth_cfg):
+        return {
+            "name": "auth-test",
+            "targets": [{"name": "t", "type": "ollama", "model": "m"}],
+            "auth": auth_cfg,
+        }
+
+    def test_valid_okta_auth(self):
+        errors = validate_plan(self._plan_with_auth({"type": "okta", "token_env": "MY_TOKEN"}))
+        assert errors == []
+
+    def test_valid_bearer_auth(self):
+        errors = validate_plan(self._plan_with_auth({"type": "bearer", "token_env": "TOK"}))
+        assert errors == []
+
+    def test_valid_none_auth(self):
+        errors = validate_plan(self._plan_with_auth({"type": "none"}))
+        assert errors == []
+
+    def test_unknown_auth_type(self):
+        errors = validate_plan(self._plan_with_auth({"type": "kerberos"}))
+        assert any("unknown auth type" in e for e in errors)
+
+    def test_okta_missing_token_env(self):
+        errors = validate_plan(self._plan_with_auth({"type": "okta"}))
+        assert any("token_env" in e for e in errors)
+
+    def test_bearer_missing_token_env(self):
+        errors = validate_plan(self._plan_with_auth({"type": "bearer"}))
+        assert any("token_env" in e for e in errors)
+
+    def test_cookie_does_not_require_token_env(self):
+        errors = validate_plan(self._plan_with_auth({"type": "cookie"}))
+        assert errors == []
+
+    def test_no_auth_section_is_valid(self):
+        plan = {"name": "t", "targets": [{"name": "t", "type": "ollama", "model": "m"}]}
+        errors = validate_plan(plan)
+        assert errors == []

@@ -18,9 +18,10 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from hydra_scan import (
-    build_parser, cmd_validate, cmd_init, cmd_scan, cmd_compare,
+    build_parser, cmd_validate, cmd_init, cmd_scan, cmd_compare, cmd_run,
     _dry_run, _save_reports, _sanitize_filename, _render_progress_line,
-    _load_and_validate_plan, _print_summary, HydraClient,
+    _load_and_validate_plan, _print_summary, _resolve_auth_token,
+    _inject_auth_headers, HydraClient,
 )
 from comparator import extract_counts
 
@@ -1396,3 +1397,212 @@ class TestCmdScanFullFlow:
 
         call_args = client.start_scan.call_args[0][0]
         assert call_args["generations"] == 3  # explicit wins over preset
+
+
+# ===================================================================
+# Auth token resolution
+# ===================================================================
+
+class TestResolveAuthToken:
+    """Test _resolve_auth_token with env vars and refresh commands."""
+
+    def test_none_type_returns_none(self):
+        result = _resolve_auth_token({"type": "none"})
+        assert result is None
+
+    def test_empty_config_returns_none(self):
+        result = _resolve_auth_token({})
+        assert result is None
+
+    def test_token_from_env_var(self, monkeypatch):
+        monkeypatch.setenv("TEST_TOKEN", "my-secret-token")
+        result = _resolve_auth_token({"type": "okta", "token_env": "TEST_TOKEN"})
+        assert result == "my-secret-token"
+
+    def test_missing_env_var_exits(self, monkeypatch):
+        monkeypatch.delenv("MISSING_TOKEN", raising=False)
+        with pytest.raises(SystemExit):
+            _resolve_auth_token({"type": "okta", "token_env": "MISSING_TOKEN"})
+
+    def test_refresh_command_success(self):
+        auth_cfg = {
+            "type": "okta",
+            "token_env": "FALLBACK",
+            "refresh_command": "echo fresh-token-123",
+        }
+        result = _resolve_auth_token(auth_cfg)
+        assert result == "fresh-token-123"
+
+    def test_refresh_command_failure_falls_back_to_env(self, monkeypatch):
+        monkeypatch.setenv("FALLBACK_TOKEN", "env-token")
+        auth_cfg = {
+            "type": "okta",
+            "token_env": "FALLBACK_TOKEN",
+            "refresh_command": "exit 1",
+        }
+        result = _resolve_auth_token(auth_cfg)
+        assert result == "env-token"
+
+    def test_bearer_type_works_same_as_okta(self, monkeypatch):
+        monkeypatch.setenv("BEARER_TOK", "bearer-val")
+        result = _resolve_auth_token({"type": "bearer", "token_env": "BEARER_TOK"})
+        assert result == "bearer-val"
+
+    def test_no_token_env_and_no_refresh_exits(self):
+        with pytest.raises(SystemExit):
+            _resolve_auth_token({"type": "okta"})
+
+
+class TestInjectAuthHeaders:
+    """Test _inject_auth_headers header injection."""
+
+    def test_injects_bearer_authorization(self):
+        config = {"rest_headers": {"Content-Type": "application/json"}}
+        _inject_auth_headers(config, {"type": "okta"}, "my-token")
+        assert config["rest_headers"]["Authorization"] == "Bearer my-token"
+        assert config["rest_headers"]["Content-Type"] == "application/json"
+
+    def test_creates_headers_if_missing(self):
+        config = {}
+        _inject_auth_headers(config, {"type": "okta"}, "tok")
+        assert config["rest_headers"]["Authorization"] == "Bearer tok"
+
+    def test_custom_header_name(self):
+        config = {}
+        auth_cfg = {"type": "okta", "token_header": "X-Auth-Token", "token_prefix": ""}
+        _inject_auth_headers(config, auth_cfg, "raw-token")
+        assert config["rest_headers"]["X-Auth-Token"] == "raw-token"
+        assert "Authorization" not in config["rest_headers"]
+
+    def test_custom_prefix(self):
+        config = {}
+        auth_cfg = {"type": "okta", "token_prefix": "Token "}
+        _inject_auth_headers(config, auth_cfg, "abc")
+        assert config["rest_headers"]["Authorization"] == "Token abc"
+
+
+class TestAuthInDryRun:
+    """Test that dry run shows auth info."""
+
+    def test_dry_run_shows_auth_type(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("MY_TOKEN", "secret")
+        plan_file = tmp_path / "auth-plan.yaml"
+        plan_file.write_text("""
+name: "auth-test"
+auth:
+  type: okta
+  token_env: MY_TOKEN
+targets:
+  - name: "api"
+    type: rest
+    endpoint: "https://example.com/api/chat"
+    body_template: '{"msg": "$INPUT"}'
+    response_field: "$.reply"
+""")
+        from plan_loader import load_plan
+        plan = load_plan(str(plan_file))
+        _dry_run(plan)
+        out = capsys.readouterr().out
+        assert "okta" in out
+        assert "MY_TOKEN" in out
+        assert "SET" in out
+
+    def test_dry_run_shows_token_not_set(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.delenv("UNSET_VAR", raising=False)
+        plan_file = tmp_path / "auth-plan.yaml"
+        # Write plan without env var references in non-auth sections
+        plan_file.write_text("""
+name: "auth-test"
+auth:
+  type: okta
+  token_env: UNSET_VAR
+targets:
+  - name: "api"
+    type: rest
+    endpoint: "https://example.com/api/chat"
+    body_template: '{"msg": "$INPUT"}'
+    response_field: "$.reply"
+""")
+        from plan_loader import load_plan
+        plan = load_plan(str(plan_file))
+        _dry_run(plan)
+        out = capsys.readouterr().out
+        assert "NOT SET" in out
+
+
+class TestAuthInCmdScan:
+    """Test --auth-token flag for ad-hoc scans."""
+
+    def test_auth_token_injected_into_headers(self):
+        client = _make_mock_client()
+        parser = build_parser()
+        args = parser.parse_args([
+            "scan", "--target-type", "rest",
+            "--rest-endpoint", "https://example.com/api",
+            "--rest-body-template", '{"msg": "$INPUT"}',
+            "--rest-response-field", "$.reply",
+            "--auth-token", "my-okta-token",
+        ])
+
+        with _patched_scan(client):
+            cmd_scan(args)
+
+        call_args = client.start_scan.call_args[0][0]
+        assert call_args["rest_headers"]["Authorization"] == "Bearer my-okta-token"
+
+
+class TestAuthInCmdRun:
+    """Test auth injection in plan-based cmd_run."""
+
+    def test_auth_token_injected_from_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SCAN_TOKEN", "env-jwt-token")
+        plan_file = tmp_path / "auth-plan.yaml"
+        plan_file.write_text("""
+name: "auth-flow"
+auth:
+  type: okta
+  token_env: SCAN_TOKEN
+targets:
+  - name: "api"
+    type: rest
+    endpoint: "https://example.com/api"
+    body_template: '{"msg": "$INPUT"}'
+    response_field: "$.reply"
+automation:
+  exit_code_policy: never
+""")
+        client = _make_mock_client()
+        parser = build_parser()
+        args = parser.parse_args(["run", "--plan", str(plan_file)])
+
+        with _patched_scan(client):
+            result = cmd_run(args)
+
+        assert result == 0
+        call_args = client.start_scan.call_args[0][0]
+        assert call_args["rest_headers"]["Authorization"] == "Bearer env-jwt-token"
+
+    def test_auth_not_injected_for_ollama_targets(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SCAN_TOKEN", "should-not-appear")
+        plan_file = tmp_path / "auth-plan.yaml"
+        plan_file.write_text("""
+name: "ollama-with-auth"
+auth:
+  type: okta
+  token_env: SCAN_TOKEN
+targets:
+  - name: "llm"
+    type: ollama
+    model: llama3.2
+automation:
+  exit_code_policy: never
+""")
+        client = _make_mock_client()
+        parser = build_parser()
+        args = parser.parse_args(["run", "--plan", str(plan_file)])
+
+        with _patched_scan(client):
+            cmd_run(args)
+
+        call_args = client.start_scan.call_args[0][0]
+        assert "rest_headers" not in call_args

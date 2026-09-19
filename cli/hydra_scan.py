@@ -147,6 +147,65 @@ def _ensure_dir(path: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Auth token resolution
+# ---------------------------------------------------------------------------
+
+def _resolve_auth_token(auth_cfg: dict, quiet: bool = False) -> Optional[str]:
+    """Resolve an auth token from environment or refresh command.
+
+    Returns the token string, or None if auth is not configured.
+    """
+    auth_type = auth_cfg.get("type", "none")
+    if auth_type == "none":
+        return None
+
+    token_env = auth_cfg.get("token_env")
+    refresh_cmd = auth_cfg.get("refresh_command")
+
+    # Try refresh command first (gets a fresh token)
+    if refresh_cmd:
+        try:
+            result = subprocess.run(
+                refresh_cmd, shell=True, capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                token = result.stdout.strip()
+                _info(f"  Auth: refreshed token via '{refresh_cmd}'", quiet)
+                return token
+            else:
+                _info(f"  Auth: refresh command failed (exit {result.returncode}), "
+                      "falling back to env var", quiet)
+        except subprocess.TimeoutExpired:
+            _info("  Auth: refresh command timed out, falling back to env var", quiet)
+        except Exception as exc:
+            _info(f"  Auth: refresh command error: {exc}, falling back to env var", quiet)
+
+    # Fall back to env var
+    if token_env:
+        token = os.environ.get(token_env)
+        if token:
+            _info(f"  Auth: using token from ${token_env}", quiet)
+            return token
+        _error(
+            f"Auth token env var '{token_env}' is not set. "
+            f"Export it before running: export {token_env}=\"your-token\""
+        )
+
+    _error(f"Auth type '{auth_type}' requires 'token_env' or 'refresh_command'")
+    return None  # unreachable, _error exits
+
+
+def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
+    """Inject the auth token into the scan config's REST headers."""
+    header_name = auth_cfg.get("token_header", "Authorization")
+    token_prefix = auth_cfg.get("token_prefix", "Bearer ")
+
+    if "rest_headers" not in scan_config:
+        scan_config["rest_headers"] = {}
+    scan_config["rest_headers"][header_name] = f"{token_prefix}{token}"
+
+
+# ---------------------------------------------------------------------------
 # Progress monitoring
 # ---------------------------------------------------------------------------
 
@@ -380,6 +439,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     client = HydraClient(args.backend_url or DEFAULT_BACKEND_URL)
     scan_configs = plan_to_scan_configs(plan)
 
+    # Resolve auth token (if configured)
+    auth_cfg = plan.get("auth", {})
+    auth_token = None
+    if auth_cfg.get("type", "none") != "none":
+        auth_token = _resolve_auth_token(auth_cfg, quiet)
+
     _info(f"Plan: {plan_name} ({len(targets)} target(s))", quiet)
 
     all_results: List[Dict[str, Any]] = []
@@ -390,6 +455,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         target_type = target.get("type", "unknown")
 
         _info(f"\n--- Target {i+1}/{len(targets)}: {target_name} ({target_type}) ---", quiet)
+
+        # Inject auth token into REST headers (if configured)
+        if auth_token and target_type == "rest":
+            _inject_auth_headers(scan_config, auth_cfg, auth_token)
 
         # Fetch and merge preset if specified
         preset = target.get("preset") or plan.get("defaults", {}).get("preset")
@@ -509,6 +578,16 @@ def _dry_run(plan: dict) -> int:
     print(f"  Targets: {len(plan.get('targets', []))}")
     print()
 
+    auth_cfg = plan.get("auth", {})
+    auth_type = auth_cfg.get("type", "none")
+    if auth_type != "none":
+        token_env = auth_cfg.get("token_env", "")
+        token_set = "SET" if os.environ.get(token_env) else "NOT SET"
+        print(f"  Auth:    {auth_type} (token from ${token_env} — {token_set})")
+        if auth_cfg.get("refresh_command"):
+            print(f"  Refresh: {auth_cfg['refresh_command']}")
+        print()
+
     defaults = plan.get("defaults", {})
     if defaults:
         print("  Global Defaults:")
@@ -579,6 +658,12 @@ def cmd_scan(args: argparse.Namespace) -> int:
             config["rest_headers"] = json.loads(args.rest_headers)
         except json.JSONDecodeError:
             _error("--rest-headers must be valid JSON")
+
+    # Inject auth token for REST targets
+    if args.auth_token:
+        if "rest_headers" not in config:
+            config["rest_headers"] = {}
+        config["rest_headers"]["Authorization"] = f"Bearer {args.auth_token}"
 
     # Fetch preset — fills in keys not already set by the user
     if args.preset:
@@ -909,6 +994,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--rest-response-field", default=None, help="JSON path for REST response extraction")
     p_scan.add_argument("--rest-headers", default=None, help="REST headers (JSON string)")
     p_scan.add_argument("--output-dir", default=None, help="Output directory")
+    p_scan.add_argument("--auth-token", default=None, help="Bearer token for authenticated REST endpoints (e.g. Okta)")
     p_scan.set_defaults(func=cmd_scan)
 
     # --- validate ---

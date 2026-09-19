@@ -1,0 +1,68 @@
+# Nexus Chat App Vulnerability Scan (Okta-Protected)
+#
+# Usage:
+#   1. Log in to Nexus via Okta in your browser
+#   2. Open DevTools (F12) > Network tab > send a chat message
+#   3. Copy the access token from the Authorization header
+#   4. Export it:
+#        export OKTA_TOKEN="eyJ..."
+#   5. Run the scan:
+#        python hydra_scan.py run --plan scan_plans/nexus-test.yaml
+#   6. For dry run first:
+#        python hydra_scan.py run --plan scan_plans/nexus-test.yaml --dry-run
+#
+# NOTE: Okta tokens expire after ~1 hour. The 'fast' preset completes
+#       in ~2 minutes, well within the token lifetime.
+
+name: "nexus-scan-promptinjection"
+description: "Scan Nexus chat app (Okta-protected) for prompt injection and MCP abuse"
+
+# --- Okta authentication ---
+# The token is read from the OKTA_TOKEN environment variable at runtime.
+# NEVER hardcode tokens in this file.
+auth:
+  type: okta
+  token_env: OKTA_TOKEN
+  # refresh_command: "./refresh-okta.sh"   # Optional: script that prints a fresh token
+
+defaults:
+  preset: fast                    # Start with fast (~2 min), safe within token lifetime
+  generations: 5                  # Conservative; increase after confirming stability
+  continue_on_error: true
+
+targets:
+  - name: "nexus-uat"
+    type: rest
+    # TODO: Update endpoint after inspecting DevTools network requests.
+    #       The root URL is unlikely to be the chat API. Look for
+    #       /api/chat, /api/v1/messages, /api/completions, etc.
+    endpoint: "https://isioaiffwwebuat06.azurewebsites.net/api/chat"
+    # Auth header is injected automatically from the 'auth' section above.
+    # Do NOT put ${OKTA_TOKEN} here -- the auth system handles it.
+    # TODO: Update body_template after inspecting the actual request body
+    #       from DevTools. The format below is a common pattern but may
+    #       differ for Nexus.
+    body_template: |
+      {"message": "$INPUT", "stream": false}
+    # TODO: Update response_field after inspecting the actual response JSON.
+    #       Use JSONPath syntax: $.choices[0].message.content, $.response, etc.
+    response_field: "$.response"
+    probes:
+      - dan
+      - encoding
+      - promptinject
+    generator_options:
+      rest:
+        request_timeout: 60       # Okta-protected apps can be slower
+
+output:
+  directory: "./hydra_reports/nexus"
+  filename_pattern: "{name}_{date}"
+
+automation:
+  exit_code_policy: never         # First run is exploratory, don't fail on findings
+
+compare:
+  enabled: true
+  fail_on_regression: true
+  regression_threshold: 3.0
