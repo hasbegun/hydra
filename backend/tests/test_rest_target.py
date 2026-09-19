@@ -285,7 +285,8 @@ class TestBuildCommandRestFlags:
         assert "rest" in opts
         assert opts["rest"]["uri"] == "https://api.example.com/chat"
         assert "--probes" in cmd
-        assert "--continue_on_error" in cmd
+        # continue_on_error is a Hydra plan-level setting, NOT a garak flag
+        assert "--continue_on_error" not in cmd
 
     def test_rest_generator_options_not_overwritten_by_user_opts(self):
         """User-provided generator_options for rest are preserved; rest_* fields
@@ -402,7 +403,8 @@ class TestRestSchemaToCommandRoundtrip:
 
         # Verify standard flags still work
         assert "--probes" in cmd
-        assert "--continue_on_error" in cmd
+        # continue_on_error is a Hydra plan-level setting, NOT a garak flag
+        assert "--continue_on_error" not in cmd
 
         idx = cmd.index("--generations")
         assert cmd[idx + 1] == "15"

@@ -253,8 +253,9 @@ class ScanManager:
         if config.get("no_report"):
             cmd.append("--no_report")
 
-        if config.get("continue_on_error"):
-            cmd.append("--continue_on_error")
+        # NOTE: continue_on_error is a Hydra plan-level setting (continue to
+        # the next target when one fails).  It is NOT a garak CLI flag and
+        # must not be forwarded to the garak subprocess.
 
         if config.get("exclude_probes"):
             cmd.extend(["--exclude_probes", config["exclude_probes"]])

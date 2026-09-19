@@ -401,7 +401,8 @@ class TestBuildCommandCombined:
         assert "--hit_rate" in cmd
         assert "--collect_timing" in cmd
         assert "--timeout_per_probe" in cmd
-        assert "--continue_on_error" in cmd
+        # continue_on_error is a Hydra plan-level setting, NOT a garak flag
+        assert "--continue_on_error" not in cmd
         assert "--extended_detectors" in cmd
 
     def test_schema_to_command_roundtrip(self):
