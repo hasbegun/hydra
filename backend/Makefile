@@ -2,7 +2,8 @@
         hydra-up hydra-down hydra-restart hydra-logs hydra-ps hydra-pull hydra-build \
         hydra-dev hydra-dev-down hydra-dev-logs hydra-dev-restart hydra-dev-attach \
         hydra-prod hydra-prod-down hydra-prod-logs \
-        hydra-garak-shell hydra-garak-logs hydra-garak-health
+        hydra-garak-shell hydra-garak-logs hydra-garak-health \
+        scan scan-dry scan-validate scan-nexus scan-nexus-dry scan-nexus-validate scan-health
 
 # Default target
 .DEFAULT_GOAL := help
@@ -242,3 +243,72 @@ hydra-garak-health: ## Check garak service health
 	@$(DOCKER_COMPOSE) exec backend python -c "import urllib.request; print(urllib.request.urlopen('http://garak:9090/health').read().decode())" 2>/dev/null \
 		&& echo "$(GREEN)✓ Garak service is healthy$(NC)" \
 		|| echo "$(RED)✗ Garak service is not responding$(NC)"
+
+# =============================================================================
+# CLI Scanning Commands
+# =============================================================================
+# Usage:
+#   make scan PLAN=scan_plans/nexus-test.yaml          Run a scan plan
+#   make scan-dry PLAN=scan_plans/nexus-test.yaml      Dry run (preview)
+#   make scan-validate PLAN=scan_plans/nexus-test.yaml Validate only
+#   make scan-nexus                                     Run Nexus scan (shortcut)
+#   make scan-nexus-dry                                 Dry run Nexus scan
+#
+# For Okta-protected targets, set the token first:
+#   export OKTA_TOKEN="eyJ..."
+#   make scan-nexus
+
+# Default plan file (override with: make scan PLAN=path/to/plan.yaml)
+PLAN ?= scan_plans/nexus-test.yaml
+
+# CLI runner (passes env vars into the container)
+CLI_RUN = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml run --rm \
+	-e OKTA_TOKEN \
+	--entrypoint python cli hydra_scan.py
+
+scan: ## Run a scan plan (PLAN=path/to/plan.yaml)
+	@if [ -z "$(PLAN)" ]; then echo "$(RED)Error: PLAN is required. Usage: make scan PLAN=scan_plans/my-plan.yaml$(NC)"; exit 1; fi
+	@echo "$(BLUE)Running scan plan: $(PLAN)$(NC)"
+	$(CLI_RUN) run --plan $(PLAN)
+	@echo "$(GREEN)✓ Scan complete$(NC)"
+
+scan-dry: ## Dry run a scan plan — preview without scanning (PLAN=path/to/plan.yaml)
+	@if [ -z "$(PLAN)" ]; then echo "$(RED)Error: PLAN is required.$(NC)"; exit 1; fi
+	@echo "$(BLUE)Dry run: $(PLAN)$(NC)"
+	$(CLI_RUN) run --plan $(PLAN) --dry-run
+
+scan-validate: ## Validate a scan plan (PLAN=path/to/plan.yaml)
+	@if [ -z "$(PLAN)" ]; then echo "$(RED)Error: PLAN is required.$(NC)"; exit 1; fi
+	@echo "$(BLUE)Validating: $(PLAN)$(NC)"
+	$(CLI_RUN) validate --plan $(PLAN)
+
+scan-nexus: ## Run Nexus chat app scan (requires OKTA_TOKEN env var)
+	@if [ -z "$$OKTA_TOKEN" ]; then \
+		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
+		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
+		echo "$(YELLOW)  2. Open DevTools > Network > copy the Authorization token$(NC)"; \
+		echo "$(YELLOW)  3. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
+		echo "$(YELLOW)  4. make scan-nexus$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Running Nexus scan (Okta auth)...$(NC)"
+	$(CLI_RUN) run --plan scan_plans/nexus-test.yaml
+	@echo "$(GREEN)✓ Nexus scan complete. Reports in cli_reports/nexus/$(NC)"
+
+scan-nexus-dry: ## Dry run Nexus scan — preview targets and auth status
+	@echo "$(BLUE)Dry run: Nexus scan$(NC)"
+	$(CLI_RUN) run --plan scan_plans/nexus-test.yaml --dry-run
+
+scan-nexus-validate: ## Validate Nexus scan plan
+	@echo "$(BLUE)Validating Nexus scan plan...$(NC)"
+	$(CLI_RUN) validate --plan scan_plans/nexus-test.yaml
+
+scan-health: ## Check backend health before scanning
+	@echo "$(BLUE)Checking scan prerequisites...$(NC)"
+	@$(CLI_RUN) health
+	@echo ""
+	@if [ -n "$$OKTA_TOKEN" ]; then \
+		echo "$(GREEN)  OKTA_TOKEN: set$(NC)"; \
+	else \
+		echo "$(YELLOW)  OKTA_TOKEN: not set (needed for Okta-protected targets)$(NC)"; \
+	fi
