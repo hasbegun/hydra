@@ -1,23 +1,36 @@
 # Nexus Chat App Vulnerability Scan (Okta-Protected)
 #
-# Architecture (discovered via Swagger):
+# Architecture (discovered via Swagger & browser DevTools):
 #   Frontend SPA:  https://isioaiffwwebuat06.azurewebsites.net  (React, serves HTML)
 #   Backend API:   https://isioaiffwwebuat07.azurewebsites.net  (ASP.NET, Swagger at /swagger)
-#   Chat endpoint: POST /api/Nexus/PromptOrchestrator           (streaming)
+#   Chat endpoint: POST /api/Nexus/PromptOrchestrator           (streaming, used by UI)
 #   Eval endpoint: POST /api/Nexus/PromptOrchestratorEval       (non-streaming, used here)
+#
+# IMPORTANT — Prompt format:
+#   The Prompt field is NOT a plain string.  It must be a JSON-stringified object:
+#     Prompt: '{"user_input_content":[{"type":"text","text":"..."}]}'
+#   The backend parses this inner JSON; sending a bare string causes HTTP 500.
+#
+# IMPORTANT — Required headers:
+#   - Authorization: Bearer <okta-token>      (injected by auth section)
+#   - Content-Type: application/json          (injected automatically)
+#   - Cookie: ARRAffinity=<value>             (Azure session pinning — copy from browser)
+#   - Origin / Referer / User-Agent           (backend validates these)
 #
 # Usage:
 #   1. Log in to Nexus via Okta in your browser
-#   2. Open DevTools (F12) > Network tab > copy the Authorization Bearer token
-#   3. Export it:
+#   2. Open DevTools (F12) > Network tab
+#   3. Copy the Authorization Bearer token from any API request
+#   4. Copy the ARRAffinity cookie value from response headers
+#   5. Export both:
 #        export OKTA_TOKEN="eyJ..."
-#   4. Run the scan:
+#        export NEXUS_COOKIE="ARRAffinity=<value>"
+#   6. Run the scan:
 #        make scan-nexus              # from backend/
-#   5. For dry run first:
+#   7. For dry run first:
 #        make scan-nexus-dry
 #
-# NOTE: Okta tokens expire after ~1 hour. The 'fast' preset completes
-#       in ~2 minutes, well within the token lifetime.
+# NOTE: Okta tokens expire after ~1 hour.
 
 name: "nexus-scan-promptinjection"
 description: "Scan Nexus chat app (Okta-protected) for prompt injection and MCP abuse"
@@ -28,11 +41,10 @@ description: "Scan Nexus chat app (Okta-protected) for prompt injection and MCP 
 auth:
   type: okta
   token_env: OKTA_TOKEN
-  # refresh_command: "./refresh-okta.sh"   # Optional: script that prints a fresh token
 
 defaults:
-  preset: fast                    # Start with fast (~2 min), safe within token lifetime
-  generations: 5                  # Conservative; increase after confirming stability
+  preset: fast
+  generations: 5
   continue_on_error: true
 
 targets:
@@ -42,39 +54,38 @@ targets:
     # Using PromptOrchestratorEval (non-streaming) -- better for automated scanning.
     endpoint: "https://isioaiffwwebuat07.azurewebsites.net/api/Nexus/PromptOrchestratorEval"
     # Auth header is injected automatically from the 'auth' section above.
-    # Do NOT put ${OKTA_TOKEN} here -- the auth system handles it.
     #
-    # Request body schema (from Swagger PromptOrchestratorRequest):
-    #   conversationId: int      (0 = new conversation)
-    #   prompt:         string   (the user message -- garak substitutes $INPUT)
-    #   username:       string   (required by server validation)
-    #   clientTime:     datetime (required format)
-    #   clientTimeZone: string   (required by server validation)
-    #   conversationMode: bool   (false = single-turn, no context)
-    #   responseMode:   string   (text output)
-    #   isWidgetOrigin: bool     (false = direct chat)
-    body_template: |
-      {"prompt": "$INPUT", "conversationId": 0, "username": "hydra-scanner", "clientTime": "2026-01-01T00:00:00Z", "clientTimeZone": "UTC", "conversationMode": false, "responseMode": "text", "isWidgetOrigin": false}
-    # Response field -- adjust after seeing a successful response.
-    # Common patterns for this type of app: $.response, $.result, $.message, $.content
-    # If the response is plain text (not JSON), set response_json to false below.
-    response_field: "$.response"
+    # Request body (discovered from browser DevTools):
+    #   ConversationId: int          (0 = new conversation)
+    #   Prompt: JSON string          ({"user_input_content":[{"type":"text","text":"..."}]})
+    #   Username: email string       (must be valid email — server validates)
+    #   ClientTime: datetime         (ISO 8601)
+    #   ClientTimeZone: string       (IANA timezone)
+    #   ConversationMode: bool       (false = single-turn)
+    #   ResponseMode: string         ("Thoroughly" = full response)
+    #   IsWidgetOrigin: bool         (false = direct chat)
+    headers:
+      Origin: "https://isioaiffwwebuat06.azurewebsites.net"
+      Referer: "https://isioaiffwwebuat06.azurewebsites.net/"
+      User-Agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+      Cookie: "${NEXUS_COOKIE}"
+    body_template: '{"ConversationId":0,"Prompt":"{\"user_input_content\":[{\"type\":\"text\",\"text\":\"$INPUT\"}]}","Username":"Inho.Choi@intusurg.com","ClientTime":"2026-01-01T00:00:00Z","ClientTimeZone":"America/Los_Angeles","ConversationMode":false,"ResponseMode":"Thoroughly","IsWidgetOrigin":false}'
+    # Response JSON: the LLM response is at facts[0].content
+    response_field: "$.facts[0].content"
     probes:
       - dan
       - encoding
       - promptinject
     generator_options:
       rest:
-        request_timeout: 120      # Chat completions can take 30-60s on complex prompts
-        # If the API returns plain text instead of JSON, uncomment:
-        # response_json: false
+        request_timeout: 120
 
 output:
   directory: "./hydra_reports/nexus"
   filename_pattern: "{name}_{date}"
 
 automation:
-  exit_code_policy: never         # First run is exploratory, don't fail on findings
+  exit_code_policy: never
 
 compare:
   enabled: false

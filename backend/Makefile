@@ -264,6 +264,7 @@ PLAN ?= scan_plans/nexus-test.yaml
 # CLI runner (passes env vars into the container)
 CLI_RUN = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml run --rm \
 	-e OKTA_TOKEN \
+	-e NEXUS_COOKIE \
 	--entrypoint python cli hydra_scan.py
 
 scan: ## Run a scan plan (PLAN=path/to/plan.yaml)
@@ -296,22 +297,26 @@ scan-nexus-quick: ## Quick Nexus smoke test (~5 min, 3 probes) — verify pipeli
 	@if [ -z "$$OKTA_TOKEN" ]; then \
 		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
 		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
-		echo "$(YELLOW)  2. Open DevTools > Network > copy the Authorization token$(NC)"; \
-		echo "$(YELLOW)  3. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
-		echo "$(YELLOW)  4. make scan-nexus-quick$(NC)"; \
+		echo "$(YELLOW)  2. Open DevTools > Network > copy Authorization token$(NC)"; \
+		echo "$(YELLOW)  3. Copy ARRAffinity cookie from response headers$(NC)"; \
+		echo "$(YELLOW)  4. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
+		echo "$(YELLOW)  5. export NEXUS_COOKIE=\"ARRAffinity=...\"$(NC)"; \
+		echo "$(YELLOW)  6. make scan-nexus-quick$(NC)"; \
 		exit 1; \
 	fi
 	@echo "$(BLUE)Running Nexus quick smoke test (3 probes, ~5 min)...$(NC)"
 	$(CLI_RUN) run --plan scan_plans/nexus-quick.yaml
 	@echo "$(GREEN)✓ Quick scan complete. Reports in hydra_reports/nexus/$(NC)"
 
-scan-nexus: ## Run Nexus full scan (~30-60 min, requires OKTA_TOKEN env var)
+scan-nexus: ## Run Nexus full scan (~30-60 min, requires OKTA_TOKEN + NEXUS_COOKIE)
 	@if [ -z "$$OKTA_TOKEN" ]; then \
 		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
 		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
-		echo "$(YELLOW)  2. Open DevTools > Network > copy the Authorization token$(NC)"; \
-		echo "$(YELLOW)  3. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
-		echo "$(YELLOW)  4. make scan-nexus$(NC)"; \
+		echo "$(YELLOW)  2. Open DevTools > Network > copy Authorization token$(NC)"; \
+		echo "$(YELLOW)  3. Copy ARRAffinity cookie from response headers$(NC)"; \
+		echo "$(YELLOW)  4. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
+		echo "$(YELLOW)  5. export NEXUS_COOKIE=\"ARRAffinity=...\"$(NC)"; \
+		echo "$(YELLOW)  6. make scan-nexus$(NC)"; \
 		exit 1; \
 	fi
 	@echo "$(BLUE)Running Nexus scan (Okta auth)...$(NC)"
@@ -322,9 +327,11 @@ scan-nexus-bg: ## Run Nexus scan in background (survives terminal disconnect)
 	@if [ -z "$$OKTA_TOKEN" ]; then \
 		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
 		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
-		echo "$(YELLOW)  2. Open DevTools > Network > copy the Authorization token$(NC)"; \
-		echo "$(YELLOW)  3. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
-		echo "$(YELLOW)  4. make scan-nexus-bg$(NC)"; \
+		echo "$(YELLOW)  2. Open DevTools > Network > copy Authorization token$(NC)"; \
+		echo "$(YELLOW)  3. Copy ARRAffinity cookie from response headers$(NC)"; \
+		echo "$(YELLOW)  4. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
+		echo "$(YELLOW)  5. export NEXUS_COOKIE=\"ARRAffinity=...\"$(NC)"; \
+		echo "$(YELLOW)  6. make scan-nexus-bg$(NC)"; \
 		exit 1; \
 	fi
 	@echo "$(BLUE)Starting Nexus scan in background...$(NC)"
