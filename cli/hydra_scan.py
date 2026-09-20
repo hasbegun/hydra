@@ -289,6 +289,29 @@ def _extract_jwt_claims(token: str) -> dict:
         return {}
 
 
+def _fetch_okta_userinfo(token: str, issuer: str) -> dict:
+    """Call the Okta userinfo endpoint to get the full user profile.
+
+    The access token's ``iss`` claim gives us the Okta issuer URL.
+    Userinfo endpoint is at ``{issuer}/v1/userinfo``.
+    Returns the user profile dict, or {} on failure.
+    """
+    if not issuer:
+        return {}
+    url = f"{issuer}/v1/userinfo"
+    try:
+        resp = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return {}
+
+
 def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
     """Inject the auth token into the scan config's REST headers.
 
@@ -296,7 +319,7 @@ def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
     - Content-Type (garak uses ``data=`` not ``json=``, so no auto header)
     - Cookie from ``$NEXUS_COOKIE`` env var (Azure ARRAffinity session pinning)
     - User-Agent default (some APIs validate this)
-    - X-User-* headers from JWT claims (Nexus requires these for auth)
+    - All-Claims + X-User-* headers from Okta userinfo (Nexus requires these)
     """
     header_name = auth_cfg.get("token_header", "Authorization")
     token_prefix = auth_cfg.get("token_prefix", "Bearer ")
@@ -319,17 +342,46 @@ def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
     # Default User-Agent (some APIs reject requests without one)
     scan_config["rest_headers"].setdefault("User-Agent", _DEFAULT_USER_AGENT)
 
-    # Inject X-User-* headers from JWT claims if not already set.
-    # Nexus API validates user identity via these custom headers.
-    claims = _extract_jwt_claims(token)
-    sub = claims.get("sub", "")  # e.g. "IChoi2@corp.intusurg.com"
-    uid = claims.get("uid", "")
-    if sub:
-        scan_config["rest_headers"].setdefault("x-user-email", sub)
-        scan_config["rest_headers"].setdefault("x-user-username", sub.split("@")[0])
-        scan_config["rest_headers"].setdefault("x-user-name", sub.split("@")[0])
-    if uid:
-        scan_config["rest_headers"].setdefault("x-user-id", uid)
+    # Fetch user profile from Okta userinfo and inject All-Claims + X-User-*
+    # headers.  The Nexus API validates user identity via these headers.
+    jwt_claims = _extract_jwt_claims(token)
+    issuer = jwt_claims.get("iss", "")
+    userinfo = _fetch_okta_userinfo(token, issuer)
+
+    if userinfo:
+        # Build All-Claims header (merge JWT access token claims + userinfo)
+        all_claims = {**jwt_claims, **userinfo}
+        # Remove signature-related fields that aren't user claims
+        for k in ("at_hash", "nonce"):
+            all_claims.pop(k, None)
+        scan_config["rest_headers"].setdefault("All-Claims", json.dumps(all_claims))
+
+        # X-User-* headers from userinfo
+        scan_config["rest_headers"].setdefault(
+            "X-User-Email", userinfo.get("email", ""))
+        scan_config["rest_headers"].setdefault(
+            "X-User-Name", userinfo.get("name", ""))
+        scan_config["rest_headers"].setdefault(
+            "X-User-Username", userinfo.get("preferred_username", "").split("@")[0])
+        scan_config["rest_headers"].setdefault(
+            "X-User-Given-Name", userinfo.get("given_name", ""))
+        scan_config["rest_headers"].setdefault(
+            "X-User-Family-Name", userinfo.get("family_name", ""))
+        scan_config["rest_headers"].setdefault(
+            "X-User-Id", userinfo.get("sub", ""))
+        scan_config["rest_headers"].setdefault("X-User-Department", "")
+    else:
+        # Fallback: extract what we can from the JWT access token
+        sub = jwt_claims.get("sub", "")
+        uid = jwt_claims.get("uid", "")
+        if sub:
+            scan_config["rest_headers"].setdefault("X-User-Email", sub)
+            scan_config["rest_headers"].setdefault(
+                "X-User-Username", sub.split("@")[0])
+            scan_config["rest_headers"].setdefault(
+                "X-User-Name", sub.split("@")[0])
+        if uid:
+            scan_config["rest_headers"].setdefault("X-User-Id", uid)
 
 
 # ---------------------------------------------------------------------------
@@ -881,29 +933,12 @@ def cmd_scan(args: argparse.Namespace) -> int:
         except json.JSONDecodeError:
             _error("--rest-headers must be valid JSON")
 
-    # Inject auth token for REST targets
+    # Inject auth token for REST targets (reuse plan-based injection logic)
     if args.auth_token:
         token = args.auth_token
         if token.lower().startswith("bearer "):
             token = token[7:].strip()
-        if "rest_headers" not in config:
-            config["rest_headers"] = {}
-        config["rest_headers"]["Authorization"] = f"Bearer {token}"
-        config["rest_headers"].setdefault("Content-Type", "application/json")
-        # Inject cookie, User-Agent, and X-User-* (same as plan-based auth)
-        cookie_val = os.environ.get("NEXUS_COOKIE", "")
-        if cookie_val and "Cookie" not in config["rest_headers"]:
-            config["rest_headers"]["Cookie"] = _clean_cookie(cookie_val)
-        config["rest_headers"].setdefault("User-Agent", _DEFAULT_USER_AGENT)
-        claims = _extract_jwt_claims(token)
-        sub = claims.get("sub", "")
-        uid = claims.get("uid", "")
-        if sub:
-            config["rest_headers"].setdefault("x-user-email", sub)
-            config["rest_headers"].setdefault("x-user-username", sub.split("@")[0])
-            config["rest_headers"].setdefault("x-user-name", sub.split("@")[0])
-        if uid:
-            config["rest_headers"].setdefault("x-user-id", uid)
+        _inject_auth_headers(config, {"type": "bearer"}, token)
 
     # Fetch preset — fills in keys not already set by the user
     if args.preset:

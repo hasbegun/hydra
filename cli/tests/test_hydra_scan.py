@@ -1720,7 +1720,7 @@ class TestExtractJwtClaims:
 
 
 class TestXUserHeaderInjection:
-    """Test that X-User-* headers are auto-injected from JWT claims."""
+    """Test that X-User-* headers are auto-injected via Okta userinfo."""
 
     def _make_token(self, claims):
         import base64
@@ -1728,26 +1728,48 @@ class TestXUserHeaderInjection:
         b64 = base64.urlsafe_b64encode(payload.encode()).rstrip(b"=").decode()
         return f"eyJ.{b64}.sig"
 
-    def test_injects_x_user_headers(self):
-        token = self._make_token({"sub": "IChoi2@corp.intusurg.com", "uid": "00u123"})
+    @patch("hydra_scan._fetch_okta_userinfo")
+    def test_injects_from_userinfo(self, mock_fetch):
+        mock_fetch.return_value = {
+            "sub": "00u123", "name": "Inho Choi",
+            "email": "Inho.Choi@intusurg.com",
+            "preferred_username": "IChoi2@corp.intusurg.com",
+            "given_name": "Inho", "family_name": "Choi",
+        }
+        token = self._make_token({"sub": "IChoi2@corp.intusurg.com", "uid": "00u123", "iss": "https://example.okta.com"})
         config = {}
         _inject_auth_headers(config, {"type": "okta"}, token)
-        assert config["rest_headers"]["x-user-email"] == "IChoi2@corp.intusurg.com"
-        assert config["rest_headers"]["x-user-username"] == "IChoi2"
-        assert config["rest_headers"]["x-user-name"] == "IChoi2"
-        assert config["rest_headers"]["x-user-id"] == "00u123"
+        assert config["rest_headers"]["X-User-Email"] == "Inho.Choi@intusurg.com"
+        assert config["rest_headers"]["X-User-Name"] == "Inho Choi"
+        assert config["rest_headers"]["X-User-Username"] == "IChoi2"
+        assert config["rest_headers"]["X-User-Id"] == "00u123"
+        assert config["rest_headers"]["X-User-Given-Name"] == "Inho"
+        assert config["rest_headers"]["X-User-Family-Name"] == "Choi"
+        assert "All-Claims" in config["rest_headers"]
 
-    def test_preserves_existing_x_user(self):
-        token = self._make_token({"sub": "auto@corp.com", "uid": "auto-uid"})
-        config = {"rest_headers": {"x-user-email": "manual@corp.com"}}
+    @patch("hydra_scan._fetch_okta_userinfo", return_value={})
+    def test_fallback_to_jwt_claims(self, mock_fetch):
+        token = self._make_token({"sub": "user@corp.com", "uid": "uid123", "iss": "https://x"})
+        config = {}
         _inject_auth_headers(config, {"type": "okta"}, token)
-        assert config["rest_headers"]["x-user-email"] == "manual@corp.com"
+        assert config["rest_headers"]["X-User-Email"] == "user@corp.com"
+        assert config["rest_headers"]["X-User-Username"] == "user"
+        assert config["rest_headers"]["X-User-Id"] == "uid123"
 
-    def test_no_x_user_without_sub(self):
+    @patch("hydra_scan._fetch_okta_userinfo")
+    def test_preserves_existing_x_user(self, mock_fetch):
+        mock_fetch.return_value = {"email": "auto@corp.com", "sub": "x"}
+        token = self._make_token({"sub": "x", "iss": "https://x"})
+        config = {"rest_headers": {"X-User-Email": "manual@corp.com"}}
+        _inject_auth_headers(config, {"type": "okta"}, token)
+        assert config["rest_headers"]["X-User-Email"] == "manual@corp.com"
+
+    @patch("hydra_scan._fetch_okta_userinfo", return_value={})
+    def test_no_x_user_without_sub(self, mock_fetch):
         token = self._make_token({"iss": "test"})
         config = {}
         _inject_auth_headers(config, {"type": "okta"}, token)
-        assert "x-user-email" not in config["rest_headers"]
+        assert "X-User-Email" not in config["rest_headers"]
 
 
 class TestAuthInDryRun:
