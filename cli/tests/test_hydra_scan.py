@@ -23,7 +23,9 @@ from hydra_scan import (
     _dry_run, _save_reports, _sanitize_filename, _render_progress_line,
     _load_and_validate_plan, _print_summary, _resolve_auth_token,
     _inject_auth_headers, _clean_cookie, _extract_jwt_claims,
-    _check_token_expiry, HydraClient,
+    _check_token_expiry, _load_checkpoint, _save_checkpoint,
+    _clear_checkpoint, _merge_probe_results, _get_token_remaining,
+    HydraClient,
 )
 from comparator import extract_counts
 
@@ -1770,6 +1772,53 @@ class TestXUserHeaderInjection:
         config = {}
         _inject_auth_headers(config, {"type": "okta"}, token)
         assert "X-User-Email" not in config["rest_headers"]
+
+
+class TestCheckpointResume:
+    """Test checkpoint save/load/clear for resume support."""
+
+    def test_save_and_load(self, tmp_path):
+        output_cfg = {"directory": str(tmp_path)}
+        checkpoint = {"completed": ["probe.A", "probe.B"], "results": [{"probe": "probe.A", "passed": 5}]}
+        _save_checkpoint("test-target", output_cfg, checkpoint)
+        loaded = _load_checkpoint("test-target", output_cfg)
+        assert loaded["completed"] == ["probe.A", "probe.B"]
+        assert len(loaded["results"]) == 1
+
+    def test_load_missing(self, tmp_path):
+        output_cfg = {"directory": str(tmp_path)}
+        loaded = _load_checkpoint("nonexistent", output_cfg)
+        assert loaded == {"completed": [], "results": []}
+
+    def test_clear(self, tmp_path):
+        output_cfg = {"directory": str(tmp_path)}
+        _save_checkpoint("test", output_cfg, {"completed": ["a"], "results": []})
+        _clear_checkpoint("test", output_cfg)
+        loaded = _load_checkpoint("test", output_cfg)
+        assert loaded == {"completed": [], "results": []}
+
+    def test_merge_results(self):
+        results = [
+            {"probe": "a", "passed": 5, "failed": 1},
+            {"probe": "b", "passed": 10, "failed": 0},
+        ]
+        merged = _merge_probe_results(results)
+        assert merged["passed"] == 15
+        assert merged["failed"] == 1
+        assert merged["total_tests"] == 16
+        assert merged["pass_rate"] == 93.8
+
+    def test_get_token_remaining(self):
+        import base64
+        claims = {"exp": int(time.time()) + 600}
+        payload = json.dumps(claims)
+        b64 = base64.urlsafe_b64encode(payload.encode()).rstrip(b"=").decode()
+        token = f"eyJ.{b64}.sig"
+        remaining = _get_token_remaining(token)
+        assert 595 <= remaining <= 605
+
+    def test_get_token_remaining_no_exp(self):
+        assert _get_token_remaining("not-a-jwt") is None
 
 
 class TestAuthInDryRun:

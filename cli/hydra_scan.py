@@ -385,6 +385,81 @@ def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Checkpoint / Resume support
+# ---------------------------------------------------------------------------
+
+def _checkpoint_path(target_name: str, output_cfg: dict) -> Path:
+    """Return the path to the checkpoint file for a target."""
+    out_dir = output_cfg.get("directory", DEFAULT_OUTPUT_DIR)
+    return Path(out_dir) / f".{_sanitize_filename(target_name)}.checkpoint"
+
+
+def _load_checkpoint(target_name: str, output_cfg: dict) -> dict:
+    """Load the checkpoint for a target.  Returns {"completed": [...], "results": [...]}."""
+    cp = _checkpoint_path(target_name, output_cfg)
+    if cp.exists():
+        try:
+            return json.loads(cp.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"completed": [], "results": []}
+
+
+def _save_checkpoint(target_name: str, output_cfg: dict, checkpoint: dict) -> None:
+    """Persist the checkpoint (completed probe list + aggregated results)."""
+    cp = _checkpoint_path(target_name, output_cfg)
+    _ensure_dir(str(cp.parent))
+    cp.write_text(json.dumps(checkpoint, indent=2))
+
+
+def _clear_checkpoint(target_name: str, output_cfg: dict) -> None:
+    """Remove the checkpoint file after all probes finish."""
+    cp = _checkpoint_path(target_name, output_cfg)
+    cp.unlink(missing_ok=True)
+
+
+def _get_token_remaining(token: str) -> Optional[int]:
+    """Return seconds until token expires, or None if unknown."""
+    claims = _extract_jwt_claims(token)
+    exp = claims.get("exp")
+    if not exp:
+        return None
+    return int(exp) - int(time.time())
+
+
+def _wait_for_fresh_token(auth_cfg: dict, quiet: bool = False) -> str:
+    """Block until the user provides a fresh token via the env var.
+
+    Prints a prompt, then polls the env var every 10 seconds until
+    a token with >5 min remaining appears.
+    """
+    token_env = auth_cfg.get("token_env", "OKTA_TOKEN")
+    print(
+        f"\n{'='*60}\n"
+        f"  TOKEN EXPIRED — scan paused\n"
+        f"  In another terminal, run:\n"
+        f"    export {token_env}=\"Bearer <fresh-token>\"\n"
+        f"  Then the scan will resume automatically.\n"
+        f"  Or press Ctrl+C to stop.\n"
+        f"{'='*60}\n",
+        flush=True,
+    )
+    while True:
+        time.sleep(10)
+        raw = os.environ.get(token_env, "")
+        if not raw:
+            continue
+        token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
+        remaining = _get_token_remaining(token)
+        if remaining is not None and remaining > _MIN_TOKEN_LIFETIME:
+            _info(f"  Fresh token detected — {remaining // 60} min remaining", quiet)
+            return token
+        elif remaining is not None:
+            # Token still expired/too short, keep waiting
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Progress monitoring
 # ---------------------------------------------------------------------------
 
@@ -687,8 +762,69 @@ def _load_and_validate_plan(path: str) -> Optional[dict]:
     return plan
 
 
+def _run_single_probe_scan(
+    client: HydraClient,
+    scan_config: dict,
+    probe: str,
+    target_name: str,
+    output_cfg: dict,
+    quiet: bool = False,
+) -> Optional[dict]:
+    """Run a scan for a single probe and return the results dict (or None on failure)."""
+    # Override probe list to just this one
+    probe_config = dict(scan_config)
+    probe_config["probes"] = [probe]
+
+    try:
+        resp = client.start_scan(probe_config)
+    except SystemExit:
+        print(f"    Failed to start probe {probe}", file=sys.stderr)
+        return None
+
+    scan_id = resp.get("scan_id")
+    _info(f"    Scan {scan_id}", quiet)
+
+    final_status = _monitor_progress_ws(
+        client, scan_id, quiet,
+        target_name=target_name, output_cfg=output_cfg,
+    )
+
+    status = final_status.get("status", "unknown")
+    if status == "failed":
+        error_msg = final_status.get("error_message", "Unknown error")
+        print(f"    Probe {probe} failed: {error_msg}", file=sys.stderr)
+        return None
+
+    try:
+        return client.scan_results(scan_id)
+    except SystemExit:
+        return final_status
+
+
+def _merge_probe_results(accumulated: list) -> dict:
+    """Merge results from multiple single-probe scans into one summary."""
+    total_pass = sum(r.get("passed", 0) for r in accumulated)
+    total_fail = sum(r.get("failed", 0) for r in accumulated)
+    total = total_pass + total_fail
+    rate = (total_pass / total * 100) if total > 0 else 0.0
+    return {
+        "status": "completed",
+        "passed": total_pass,
+        "failed": total_fail,
+        "total_tests": total,
+        "pass_rate": round(rate, 1),
+        "probes_completed": len(accumulated),
+        "probe_results": accumulated,
+    }
+
+
 def cmd_run(args: argparse.Namespace) -> int:
-    """Execute a YAML scan plan."""
+    """Execute a YAML scan plan.
+
+    When ``--resume`` is passed (or the plan has many probes), probes run
+    one at a time with a checkpoint saved after each.  If the token expires,
+    the scan pauses and waits for a fresh token before continuing.
+    """
     plan = _load_and_validate_plan(args.plan)
     if plan is None:
         return 1
@@ -713,7 +849,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     if auth_cfg.get("type", "none") != "none":
         auth_token = _resolve_auth_token(auth_cfg, quiet)
 
+    resume_mode = getattr(args, "resume", False)
+
     _info(f"Plan: {plan_name} ({len(targets)} target(s))", quiet)
+    if resume_mode:
+        _info("  Resume mode: completed probes will be skipped", quiet)
 
     all_results: List[Dict[str, Any]] = []
     exit_code = 0
@@ -734,15 +874,103 @@ def cmd_run(args: argparse.Namespace) -> int:
             try:
                 preset_data = client.get_preset(preset)
                 preset_config = preset_data.get("config", {})
-                # Preset probes override default "all" only if not explicitly set
                 if scan_config.get("probes") == ["all"] and preset_config.get("probes"):
                     scan_config["probes"] = preset_config["probes"]
-                # Merge other preset settings that weren't explicitly set
                 for key in ("generations", "parallel_attempts", "parallel_requests"):
                     if key not in target and key not in plan.get("defaults", {}) and key in preset_config:
                         scan_config[key] = preset_config[key]
             except SystemExit:
                 _info(f"  Warning: preset '{preset}' not available, using defaults", quiet)
+
+        probes = scan_config.get("probes", [])
+
+        # --- Probe-by-probe mode (resume or many probes) ---
+        if resume_mode and len(probes) > 1:
+            checkpoint = _load_checkpoint(target_name, output_cfg)
+            completed = set(checkpoint.get("completed", []))
+            accumulated = checkpoint.get("results", [])
+
+            if completed:
+                _info(f"  Resuming: {len(completed)} probes already done, "
+                      f"{len(probes) - len(completed)} remaining", quiet)
+
+            for pi, probe in enumerate(probes):
+                if probe in completed:
+                    _info(f"  [{pi+1}/{len(probes)}] {probe} — skipped (done)", quiet)
+                    continue
+
+                # Check token before each probe
+                if auth_token:
+                    remaining = _get_token_remaining(auth_token)
+                    if remaining is not None and remaining < _MIN_TOKEN_LIFETIME:
+                        _info(f"  Token expired or <5min left — pausing...", quiet)
+                        auth_token = _wait_for_fresh_token(auth_cfg, quiet)
+                        # Re-inject headers with the fresh token
+                        _inject_auth_headers(scan_config, auth_cfg, auth_token)
+
+                _info(f"  [{pi+1}/{len(probes)}] {probe}", quiet)
+                result = _run_single_probe_scan(
+                    client, scan_config, probe, target_name, output_cfg, quiet,
+                )
+
+                if result:
+                    accumulated.append({
+                        "probe": probe,
+                        **{k: result.get(k, 0) for k in
+                           ("passed", "failed", "total_tests", "pass_rate")},
+                    })
+                    completed.add(probe)
+                    _save_checkpoint(target_name, output_cfg, {
+                        "completed": list(completed),
+                        "results": accumulated,
+                    })
+                    p = result.get("passed", 0)
+                    f = result.get("failed", 0)
+                    _info(f"    Done: {p} pass, {f} fail", quiet)
+                else:
+                    _info(f"    Failed — continuing to next probe", quiet)
+
+            # All probes done — merge results and print summary
+            merged = _merge_probe_results(accumulated)
+            paths: Dict[str, str] = {}
+            out_dir = _ensure_dir(output_cfg.get("directory", DEFAULT_OUTPUT_DIR))
+            fname = _sanitize_filename(target_name) + "_" + datetime.datetime.now().strftime("%Y-%m-%d")
+            json_path = out_dir / f"{fname}.json"
+            json_path.write_text(json.dumps(merged, indent=2))
+            paths["json"] = str(json_path)
+
+            if not quiet:
+                _print_summary(merged, target_name, paths)
+
+            _clear_checkpoint(target_name, output_cfg)
+
+            passed_total = merged.get("passed", 0)
+            failed_total = merged.get("failed", 0)
+            total_total = merged.get("total_tests", 0)
+            pass_rate = merged.get("pass_rate", 0.0)
+
+            target_result = {
+                "name": target_name,
+                "type": target_type,
+                "status": "completed",
+                "total_tests": total_total,
+                "passed": passed_total,
+                "failed": failed_total,
+                "pass_rate": pass_rate,
+                "reports": paths,
+            }
+            all_results.append(target_result)
+
+            policy = auto_cfg.get("exit_code_policy", "any_fail")
+            if policy == "any_fail" and failed_total > 0:
+                exit_code = 1
+            elif policy == "threshold":
+                min_rate = auto_cfg.get("min_pass_rate", 80.0)
+                if pass_rate < min_rate:
+                    exit_code = 1
+            continue
+
+        # --- Standard mode (all probes in one garak run) ---
 
         # Start scan
         try:
@@ -1253,6 +1481,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_run = sub.add_parser("run", help="Run a YAML scan plan")
     p_run.add_argument("--plan", required=True, help="Path to YAML scan plan file")
     p_run.add_argument("--dry-run", action="store_true", help="Show what would run without scanning")
+    p_run.add_argument("--resume", action="store_true",
+                       help="Resume a previous scan — skip completed probes, "
+                            "pause for fresh token when expired")
     p_run.add_argument("--output-dir", default=None, help="Override output directory")
     p_run.set_defaults(func=cmd_run)
 

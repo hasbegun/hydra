@@ -1,0 +1,176 @@
+# Nexus Full Vulnerability Scan (All Active Probes)
+#
+# Runs ALL active garak probes against the Nexus chat API.
+# This is a long-running scan (~10+ hours) that requires multiple
+# Okta token refreshes.
+#
+# Use --resume to handle token expiry gracefully:
+#   - Probes run one at a time
+#   - Progress is checkpointed after each probe
+#   - When the token expires, the scan pauses and waits for a fresh token
+#   - On restart with --resume, completed probes are skipped
+#
+# Usage:
+#   export OKTA_TOKEN="Bearer eyJ..."
+#   export NEXUS_COOKIE="ARRAffinity=<value from browser DevTools>"
+#   make scan-nexus-full             # from backend/
+#
+# To resume after a Ctrl+C or token expiry:
+#   export OKTA_TOKEN="Bearer <fresh-token>"
+#   make scan-nexus-full             # automatically resumes
+#
+# Each probe takes ~2-30 min depending on prompt count.
+# The scan saves a checkpoint after each probe completes.
+
+name: "nexus-full-scan"
+description: "Full vulnerability scan — all active probes with resume support"
+
+auth:
+  type: okta
+  token_env: OKTA_TOKEN
+
+defaults:
+  preset: fast
+  generations: 2
+  continue_on_error: true
+
+targets:
+  - name: "nexus-uat"
+    type: rest
+    endpoint: "http://localhost:9090/nexus-proxy/PromptOrchestratorEval"
+    headers:
+      Origin: "https://isioaiffwwebuat06.azurewebsites.net"
+      Referer: "https://isioaiffwwebuat06.azurewebsites.net/"
+    body_template: '{"prompt": "$INPUT"}'
+    response_field: "$.facts[0].content"
+    probes:
+      # --- Prompt Injection & Jailbreaks (~37 prompts) ---
+      - dan.Ablation_Dan_11_0         #  1 prompt
+      - dan.AutoDANCached             # 26 prompts
+      - dan.DanInTheWild              # 10 prompts
+      - dra.DRA                       #  ? prompts
+
+      # --- Prompt Injection via Injection (~15 prompts) ---
+      - promptinject.HijackHateHumans #  5 prompts
+      - promptinject.HijackKillHumans #  5 prompts
+      - promptinject.HijackLongPrompt #  5 prompts
+
+      # --- Encoding Bypass (~150 prompts) ---
+      - encoding.InjectAscii85
+      - encoding.InjectAtbash
+      - encoding.InjectBase16
+      - encoding.InjectBase2048
+      - encoding.InjectBase32
+      - encoding.InjectBase64
+      - encoding.InjectBraille
+      - encoding.InjectEcoji
+      - encoding.InjectHex
+      - encoding.InjectMorse
+      - encoding.InjectNato
+      - encoding.InjectROT13
+      - encoding.InjectUU
+      - encoding.InjectUnicodeTagChars
+      - encoding.InjectZalgo
+
+      # --- Prompt Hijacking (~8 prompts) ---
+      - goodside.Tag
+      - goodside.ThreatenJSON         #  1 prompt
+      - goodside.WhoIsRiley           #  6 prompts
+
+      # --- Content Safety / LMRC (~19 prompts) ---
+      - lmrc.Bullying                 #  7 prompts
+      - lmrc.Deadnaming              #  6 prompts
+      - lmrc.QuackMedicine           #  1 prompt
+      - lmrc.SexualContent           #  1 prompt
+      - lmrc.Sexualisation           #  3 prompts
+      - lmrc.SlurUsage               #  1 prompt
+
+      # --- Web / Code Injection ---
+      - web_injection.ColabAIDataLeakage
+      - web_injection.MarkdownImageExfil
+      - web_injection.MarkdownURIImageExfilExtended
+      - web_injection.MarkdownURINonImageExfilExtended
+      - web_injection.MarkdownXSS
+      - web_injection.PlaygroundMarkdownExfil
+      - web_injection.StringAssemblyDataExfil
+      - web_injection.TaskXSS
+      - exploitation.JinjaTemplatePythonInjection
+      - exploitation.SQLInjectionEcho
+
+      # --- Latent / Hidden Injection ---
+      - latentinjection.LatentInjectionFactSnippetEiffel
+      - latentinjection.LatentInjectionFactSnippetLegal
+      - latentinjection.LatentInjectionReport
+      - latentinjection.LatentInjectionResume
+      - latentinjection.LatentInjectionTranslationEnFr
+      - latentinjection.LatentInjectionTranslationEnZh
+      - latentinjection.LatentJailbreak
+      - latentinjection.LatentWhois
+      - latentinjection.LatentWhoisSnippet
+
+      # --- System Prompt & API Key Extraction ---
+      - sysprompt_extraction.SystemPromptExtraction
+      - apikey.CompleteKey
+      - apikey.GetKey
+
+      # --- Data Leakage / Memorization ---
+      - leakreplay.GuardianCloze
+      - leakreplay.GuardianComplete
+      - leakreplay.LiteratureCloze
+      - leakreplay.LiteratureComplete
+      - leakreplay.NYTCloze
+      - leakreplay.NYTComplete
+      - leakreplay.PotterCloze
+      - leakreplay.PotterComplete
+
+      # --- Malware Generation ---
+      - malwaregen.Evasion
+      - malwaregen.Payload
+      - malwaregen.SubFunctions
+      - malwaregen.TopLevel
+
+      # --- Package Hallucination ---
+      - packagehallucination.Python
+      - packagehallucination.JavaScript
+      - packagehallucination.Ruby
+      - packagehallucination.Rust
+      - packagehallucination.Dart
+      - packagehallucination.Perl
+      - packagehallucination.RakuLand
+
+      # --- Other Active Probes ---
+      - adaptive_attacks.AdaptiveAttacks
+      - ansiescape.AnsiEscaped
+      - ansiescape.AnsiRaw
+      - atkgen.Tox
+      - badchars.BadCharacters
+      - continuation.ContinueSlursReclaimedSlurs
+      - divergence.Repeat
+      - divergence.RepeatedToken
+      - grandma.Slurs
+      - grandma.Substances
+      - grandma.Win10
+      - grandma.Win11
+      - misleading.FalseAssertion
+      - phrasing.FutureTense
+      - phrasing.PastTense
+      - realtoxicityprompts.RTPBlank
+      - sata.MLM
+      - snowball.GraphConnectivity
+      - suffix.GCGCached
+      - tap.TAPCached
+      - topic.WordnetControversial
+
+    generator_options:
+      rest:
+        request_timeout: 120
+
+output:
+  directory: "./hydra_reports/nexus"
+  filename_pattern: "{name}_{date}"
+
+automation:
+  exit_code_policy: never
+
+compare:
+  enabled: false

@@ -308,6 +308,23 @@ scan-nexus-quick: ## Quick Nexus smoke test (~5 min, 3 probes) — verify pipeli
 	$(CLI_RUN) run --plan scan_plans/nexus-quick.yaml
 	@echo "$(GREEN)✓ Quick scan complete. Reports in hydra_reports/nexus/$(NC)"
 
+scan-nexus-full: ## Run ALL probes with resume support (handles token expiry automatically)
+	@if [ -z "$$OKTA_TOKEN" ]; then \
+		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
+		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
+		echo "$(YELLOW)  2. Open DevTools > Network > copy Authorization token$(NC)"; \
+		echo "$(YELLOW)  3. Copy ARRAffinity cookie from response headers$(NC)"; \
+		echo "$(YELLOW)  4. export OKTA_TOKEN=\"Bearer eyJ...\"$(NC)"; \
+		echo "$(YELLOW)  5. export NEXUS_COOKIE=\"ARRAffinity=...\"$(NC)"; \
+		echo "$(YELLOW)  6. make scan-nexus-full$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Running full Nexus scan with resume support...$(NC)"
+	@echo "$(YELLOW)  Probes run one at a time. Token expiry is handled automatically.$(NC)"
+	@echo "$(YELLOW)  If stopped, re-run this command to resume from where you left off.$(NC)"
+	$(CLI_RUN) run --plan scan_plans/nexus-full.yaml --resume
+	@echo "$(GREEN)✓ Full scan complete. Reports in hydra_reports/nexus/$(NC)"
+
 scan-nexus: ## Run Nexus full scan (~30-60 min, requires OKTA_TOKEN + NEXUS_COOKIE)
 	@if [ -z "$$OKTA_TOKEN" ]; then \
 		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
