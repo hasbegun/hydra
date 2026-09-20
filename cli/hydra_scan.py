@@ -219,6 +219,9 @@ def _clean_cookie(raw: str) -> str:
     Users often paste the full Set-Cookie header:
         ARRAffinity=abc123;Path=/;HttpOnly;Secure;Domain=example.com
     This returns just: ARRAffinity=abc123
+
+    Also auto-adds ARRAffinitySameSite when only ARRAffinity is present
+    (Azure always sets both cookies with the same value).
     """
     parts = [p.strip() for p in raw.split(";")]
     kept = []
@@ -226,7 +229,31 @@ def _clean_cookie(raw: str) -> str:
         key = part.split("=", 1)[0].strip().lower()
         if key not in _COOKIE_ATTRS:
             kept.append(part)
-    return "; ".join(kept)
+    result = "; ".join(kept)
+    # Auto-add the SameSite variant if missing (Azure requires both)
+    if "ARRAffinity=" in result and "ARRAffinitySameSite=" not in result:
+        for part in kept:
+            if part.strip().startswith("ARRAffinity="):
+                val = part.split("=", 1)[1]
+                result += f"; ARRAffinitySameSite={val}"
+                break
+    return result
+
+
+def _extract_jwt_claims(token: str) -> dict:
+    """Decode JWT payload (without verification) to extract claims."""
+    try:
+        import base64
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        payload = parts[1]
+        # Add padding
+        payload += "=" * (4 - len(payload) % 4)
+        decoded = base64.urlsafe_b64decode(payload)
+        return json.loads(decoded)
+    except Exception:
+        return {}
 
 
 def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
@@ -236,6 +263,7 @@ def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
     - Content-Type (garak uses ``data=`` not ``json=``, so no auto header)
     - Cookie from ``$NEXUS_COOKIE`` env var (Azure ARRAffinity session pinning)
     - User-Agent default (some APIs validate this)
+    - X-User-* headers from JWT claims (Nexus requires these for auth)
     """
     header_name = auth_cfg.get("token_header", "Authorization")
     token_prefix = auth_cfg.get("token_prefix", "Bearer ")
@@ -257,6 +285,18 @@ def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
 
     # Default User-Agent (some APIs reject requests without one)
     scan_config["rest_headers"].setdefault("User-Agent", _DEFAULT_USER_AGENT)
+
+    # Inject X-User-* headers from JWT claims if not already set.
+    # Nexus API validates user identity via these custom headers.
+    claims = _extract_jwt_claims(token)
+    sub = claims.get("sub", "")  # e.g. "IChoi2@corp.intusurg.com"
+    uid = claims.get("uid", "")
+    if sub:
+        scan_config["rest_headers"].setdefault("x-user-email", sub)
+        scan_config["rest_headers"].setdefault("x-user-username", sub.split("@")[0])
+        scan_config["rest_headers"].setdefault("x-user-name", sub.split("@")[0])
+    if uid:
+        scan_config["rest_headers"].setdefault("x-user-id", uid)
 
 
 # ---------------------------------------------------------------------------
@@ -817,11 +857,20 @@ def cmd_scan(args: argparse.Namespace) -> int:
             config["rest_headers"] = {}
         config["rest_headers"]["Authorization"] = f"Bearer {token}"
         config["rest_headers"].setdefault("Content-Type", "application/json")
-        # Inject cookie and User-Agent (same as plan-based auth)
+        # Inject cookie, User-Agent, and X-User-* (same as plan-based auth)
         cookie_val = os.environ.get("NEXUS_COOKIE", "")
         if cookie_val and "Cookie" not in config["rest_headers"]:
-            config["rest_headers"]["Cookie"] = cookie_val
+            config["rest_headers"]["Cookie"] = _clean_cookie(cookie_val)
         config["rest_headers"].setdefault("User-Agent", _DEFAULT_USER_AGENT)
+        claims = _extract_jwt_claims(token)
+        sub = claims.get("sub", "")
+        uid = claims.get("uid", "")
+        if sub:
+            config["rest_headers"].setdefault("x-user-email", sub)
+            config["rest_headers"].setdefault("x-user-username", sub.split("@")[0])
+            config["rest_headers"].setdefault("x-user-name", sub.split("@")[0])
+        if uid:
+            config["rest_headers"].setdefault("x-user-id", uid)
 
     # Fetch preset — fills in keys not already set by the user
     if args.preset:

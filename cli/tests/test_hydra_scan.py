@@ -21,7 +21,7 @@ from hydra_scan import (
     build_parser, cmd_validate, cmd_init, cmd_scan, cmd_compare, cmd_run,
     _dry_run, _save_reports, _sanitize_filename, _render_progress_line,
     _load_and_validate_plan, _print_summary, _resolve_auth_token,
-    _inject_auth_headers, _clean_cookie, HydraClient,
+    _inject_auth_headers, _clean_cookie, _extract_jwt_claims, HydraClient,
 )
 from comparator import extract_counts
 
@@ -1604,7 +1604,9 @@ class TestInjectAuthHeaders:
         monkeypatch.setenv("NEXUS_COOKIE", "ARRAffinity=abc123")
         config = {}
         _inject_auth_headers(config, {"type": "okta"}, "tok")
-        assert config["rest_headers"]["Cookie"] == "ARRAffinity=abc123"
+        cookie = config["rest_headers"]["Cookie"]
+        assert "ARRAffinity=abc123" in cookie
+        assert "ARRAffinitySameSite=abc123" in cookie
 
     def test_no_cookie_when_env_not_set(self, monkeypatch):
         monkeypatch.delenv("NEXUS_COOKIE", raising=False)
@@ -1631,7 +1633,9 @@ class TestInjectAuthHeaders:
         monkeypatch.setenv("NEXUS_COOKIE", raw)
         config = {}
         _inject_auth_headers(config, {"type": "okta"}, "tok")
-        assert config["rest_headers"]["Cookie"] == "ARRAffinity=abc123"
+        cookie = config["rest_headers"]["Cookie"]
+        assert "ARRAffinity=abc123" in cookie
+        assert "ARRAffinitySameSite=abc123" in cookie
 
 
 class TestCleanCookie:
@@ -1639,10 +1643,17 @@ class TestCleanCookie:
 
     def test_strips_all_attributes(self):
         raw = "ARRAffinity=abc;Path=/;HttpOnly;Secure;Domain=x.com;SameSite=None"
-        assert _clean_cookie(raw) == "ARRAffinity=abc"
+        result = _clean_cookie(raw)
+        assert "ARRAffinity=abc" in result
+        assert "ARRAffinitySameSite=abc" in result
 
     def test_keeps_plain_cookie(self):
         assert _clean_cookie("session=xyz") == "session=xyz"
+
+    def test_no_duplicate_samesite(self):
+        """Don't add SameSite variant if already present."""
+        raw = "ARRAffinity=abc; ARRAffinitySameSite=abc"
+        assert _clean_cookie(raw) == "ARRAffinity=abc; ARRAffinitySameSite=abc"
 
     def test_keeps_multiple_cookies(self):
         raw = "a=1; b=2; Path=/; HttpOnly"
@@ -1656,10 +1667,60 @@ class TestCleanCookie:
                "7843d8593b8063;Path=/;HttpOnly;Secure;Domain=isioaiffwwebuat07"
                ".azurewebsites.net")
         result = _clean_cookie(raw)
-        assert result.startswith("ARRAffinity=205712c")
+        assert "ARRAffinity=205712c" in result
+        assert "ARRAffinitySameSite=205712c" in result
         assert "Path" not in result
         assert "HttpOnly" not in result
         assert "Domain" not in result
+
+
+class TestExtractJwtClaims:
+    """Test JWT claim extraction for X-User-* headers."""
+
+    def test_extracts_sub_and_uid(self):
+        # Build a minimal JWT: header.payload.signature
+        import base64
+        payload = json.dumps({"sub": "user@corp.com", "uid": "abc123"})
+        b64 = base64.urlsafe_b64encode(payload.encode()).rstrip(b"=").decode()
+        token = f"eyJ.{b64}.sig"
+        claims = _extract_jwt_claims(token)
+        assert claims["sub"] == "user@corp.com"
+        assert claims["uid"] == "abc123"
+
+    def test_returns_empty_on_invalid(self):
+        assert _extract_jwt_claims("not-a-jwt") == {}
+        assert _extract_jwt_claims("") == {}
+
+
+class TestXUserHeaderInjection:
+    """Test that X-User-* headers are auto-injected from JWT claims."""
+
+    def _make_token(self, claims):
+        import base64
+        payload = json.dumps(claims)
+        b64 = base64.urlsafe_b64encode(payload.encode()).rstrip(b"=").decode()
+        return f"eyJ.{b64}.sig"
+
+    def test_injects_x_user_headers(self):
+        token = self._make_token({"sub": "IChoi2@corp.intusurg.com", "uid": "00u123"})
+        config = {}
+        _inject_auth_headers(config, {"type": "okta"}, token)
+        assert config["rest_headers"]["x-user-email"] == "IChoi2@corp.intusurg.com"
+        assert config["rest_headers"]["x-user-username"] == "IChoi2"
+        assert config["rest_headers"]["x-user-name"] == "IChoi2"
+        assert config["rest_headers"]["x-user-id"] == "00u123"
+
+    def test_preserves_existing_x_user(self):
+        token = self._make_token({"sub": "auto@corp.com", "uid": "auto-uid"})
+        config = {"rest_headers": {"x-user-email": "manual@corp.com"}}
+        _inject_auth_headers(config, {"type": "okta"}, token)
+        assert config["rest_headers"]["x-user-email"] == "manual@corp.com"
+
+    def test_no_x_user_without_sub(self):
+        token = self._make_token({"iss": "test"})
+        config = {}
+        _inject_auth_headers(config, {"type": "okta"}, token)
+        assert "x-user-email" not in config["rest_headers"]
 
 
 class TestAuthInDryRun:
