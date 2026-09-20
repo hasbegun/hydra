@@ -7,8 +7,9 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+import requests as http_requests
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 from typing import Dict, List, Optional, Any
@@ -148,6 +149,81 @@ async def get_report(filename: str):
 
     media_type = "text/html" if filename.endswith(".html") else "application/json"
     return FileResponse(str(file_path), media_type=media_type, filename=filename)
+
+
+# --- Nexus Proxy ---
+# Garak's REST generator does naive $INPUT replacement without double-escaping.
+# When the Nexus API requires a JSON-stringified object in the Prompt field,
+# probe prompts containing quotes break the nested JSON.  This proxy accepts
+# a simple {"prompt": "..."} body from garak, wraps it in the nested format
+# the Nexus API expects, and forwards the request with all original headers.
+
+_NEXUS_PROXY_FORWARD_HEADERS = {
+    "authorization", "content-type", "cookie", "user-agent", "origin",
+    "referer", "all-claims", "x-user-email", "x-user-name", "x-user-username",
+    "x-user-id", "x-user-given-name", "x-user-family-name", "x-user-department",
+}
+
+
+@app.post("/nexus-proxy/{path:path}")
+async def nexus_proxy(path: str, request: Request):
+    """Proxy that wraps a simple prompt body into the Nexus nested format."""
+    raw_body = await request.body()
+    try:
+        body = json.loads(raw_body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    prompt_text = body.get("prompt", "")
+
+    # Read config from query params or env
+    target_url = request.query_params.get(
+        "target_url",
+        os.environ.get("NEXUS_TARGET_URL",
+                        "https://isioaiffwwebuat07.azurewebsites.net"),
+    )
+    username = request.query_params.get(
+        "username",
+        os.environ.get("NEXUS_USERNAME", "Inho.Choi@intusurg.com"),
+    )
+
+    # Build the nested body format the Nexus API expects
+    nexus_body = {
+        "ConversationId": 0,
+        "Prompt": json.dumps({
+            "user_input_content": [{"type": "text", "text": prompt_text}]
+        }),
+        "Username": username,
+        "ClientTime": "2026-01-01T00:00:00Z",
+        "ClientTimeZone": "America/Los_Angeles",
+        "ConversationMode": False,
+        "ResponseMode": "Thoroughly",
+        "IsWidgetOrigin": False,
+    }
+
+    # Forward original auth/identity headers
+    fwd_headers = {}
+    for key, val in request.headers.items():
+        if key.lower() in _NEXUS_PROXY_FORWARD_HEADERS:
+            fwd_headers[key] = val
+    fwd_headers["Content-Type"] = "application/json"
+
+    api_url = f"{target_url}/api/Nexus/{path}"
+    try:
+        resp = http_requests.post(
+            api_url, json=nexus_body, headers=fwd_headers, timeout=120,
+        )
+        # Return the Nexus response as-is
+        try:
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        except ValueError:
+            return JSONResponse(
+                content={"error": resp.text}, status_code=resp.status_code,
+            )
+    except http_requests.Timeout:
+        raise HTTPException(status_code=504, detail="Nexus API timeout")
+    except http_requests.ConnectionError as e:
+        raise HTTPException(status_code=502, detail=f"Nexus API unreachable: {e}")
 
 
 if __name__ == "__main__":

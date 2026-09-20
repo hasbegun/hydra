@@ -52,23 +52,17 @@ targets:
     type: rest
     # Backend API is on *07*, NOT *06* (which is the frontend SPA).
     # Using PromptOrchestratorEval (non-streaming) -- better for automated scanning.
-    endpoint: "https://isioaiffwwebuat07.azurewebsites.net/api/Nexus/PromptOrchestratorEval"
+    # Route through the local Nexus proxy (garak service port 9090) which
+    # wraps the simple {"prompt":"..."} body into the nested JSON format
+    # the Nexus API requires.  This avoids double-JSON-escaping issues
+    # that break garak's naive $INPUT substitution.
+    endpoint: "http://localhost:9090/nexus-proxy/PromptOrchestratorEval"
     # Auth header is injected automatically from the 'auth' section above.
-    #
-    # Request body (discovered from browser DevTools):
-    #   ConversationId: int          (0 = new conversation)
-    #   Prompt: JSON string          ({"user_input_content":[{"type":"text","text":"..."}]})
-    #   Username: email string       (must be valid email — server validates)
-    #   ClientTime: datetime         (ISO 8601)
-    #   ClientTimeZone: string       (IANA timezone)
-    #   ConversationMode: bool       (false = single-turn)
-    #   ResponseMode: string         ("Thoroughly" = full response)
-    #   IsWidgetOrigin: bool         (false = direct chat)
     # Cookie ($NEXUS_COOKIE) and User-Agent are injected automatically by the CLI.
     headers:
       Origin: "https://isioaiffwwebuat06.azurewebsites.net"
       Referer: "https://isioaiffwwebuat06.azurewebsites.net/"
-    body_template: '{"ConversationId":0,"Prompt":"{\"user_input_content\":[{\"type\":\"text\",\"text\":\"$INPUT\"}]}","Username":"Inho.Choi@intusurg.com","ClientTime":"2026-01-01T00:00:00Z","ClientTimeZone":"America/Los_Angeles","ConversationMode":false,"ResponseMode":"Thoroughly","IsWidgetOrigin":false}'
+    body_template: '{"prompt": "$INPUT"}'
     # Response JSON: the LLM response is at facts[0].content
     response_field: "$.facts[0].content"
     probes:

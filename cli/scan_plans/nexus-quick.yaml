@@ -29,12 +29,16 @@ defaults:
 targets:
   - name: "nexus-uat"
     type: rest
-    endpoint: "https://isioaiffwwebuat07.azurewebsites.net/api/Nexus/PromptOrchestratorEval"
+    # Route through the local Nexus proxy (garak service port 9090) which
+    # wraps the simple {"prompt":"..."} body into the nested JSON format
+    # the Nexus API requires.  This avoids double-JSON-escaping issues
+    # that break garak's naive $INPUT substitution.
+    endpoint: "http://localhost:9090/nexus-proxy/PromptOrchestratorEval"
     # Cookie ($NEXUS_COOKIE) and User-Agent are injected automatically by the CLI.
     headers:
       Origin: "https://isioaiffwwebuat06.azurewebsites.net"
       Referer: "https://isioaiffwwebuat06.azurewebsites.net/"
-    body_template: '{"ConversationId":0,"Prompt":"{\"user_input_content\":[{\"type\":\"text\",\"text\":\"$INPUT\"}]}","Username":"Inho.Choi@intusurg.com","ClientTime":"2026-01-01T00:00:00Z","ClientTimeZone":"America/Los_Angeles","ConversationMode":false,"ResponseMode":"Thoroughly","IsWidgetOrigin":false}'
+    body_template: '{"prompt": "$INPUT"}'
     response_field: "$.facts[0].content"
     probes:
       - goodside.ThreatenJSON       #  1 prompt  — JSON output hijack
