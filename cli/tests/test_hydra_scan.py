@@ -9,6 +9,7 @@ import os
 import sys
 import subprocess
 import json
+import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 from io import StringIO
@@ -21,7 +22,8 @@ from hydra_scan import (
     build_parser, cmd_validate, cmd_init, cmd_scan, cmd_compare, cmd_run,
     _dry_run, _save_reports, _sanitize_filename, _render_progress_line,
     _load_and_validate_plan, _print_summary, _resolve_auth_token,
-    _inject_auth_headers, _clean_cookie, _extract_jwt_claims, HydraClient,
+    _inject_auth_headers, _clean_cookie, _extract_jwt_claims,
+    _check_token_expiry, HydraClient,
 )
 from comparator import extract_counts
 
@@ -1550,6 +1552,31 @@ class TestResolveAuthToken:
     def test_no_token_env_and_no_refresh_exits(self):
         with pytest.raises(SystemExit):
             _resolve_auth_token({"type": "okta"})
+
+    def _make_jwt_token(self, claims):
+        """Build a minimal JWT with the given payload claims."""
+        import base64
+        payload = json.dumps(claims)
+        b64 = base64.urlsafe_b64encode(payload.encode()).rstrip(b"=").decode()
+        return f"eyJ.{b64}.sig"
+
+    def test_expired_token_exits(self, monkeypatch):
+        expired = self._make_jwt_token({"exp": int(time.time()) - 60})
+        monkeypatch.setenv("TOK", expired)
+        with pytest.raises(SystemExit):
+            _resolve_auth_token({"type": "okta", "token_env": "TOK"})
+
+    def test_nearly_expired_token_exits(self, monkeypatch):
+        almost = self._make_jwt_token({"exp": int(time.time()) + 120})  # 2 min left
+        monkeypatch.setenv("TOK", almost)
+        with pytest.raises(SystemExit):
+            _resolve_auth_token({"type": "okta", "token_env": "TOK"})
+
+    def test_valid_token_passes(self, monkeypatch):
+        valid = self._make_jwt_token({"exp": int(time.time()) + 3600})  # 1 hr
+        monkeypatch.setenv("TOK", valid)
+        result = _resolve_auth_token({"type": "okta", "token_env": "TOK"})
+        assert result == valid
 
 
 class TestInjectAuthHeaders:

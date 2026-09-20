@@ -151,10 +151,41 @@ def _ensure_dir(path: str) -> Path:
 # Auth token resolution
 # ---------------------------------------------------------------------------
 
+# Minimum remaining token lifetime (seconds) before the CLI refuses to start.
+_MIN_TOKEN_LIFETIME = 300  # 5 minutes
+
+
+def _check_token_expiry(token: str, quiet: bool = False) -> None:
+    """Warn or abort if the JWT token is expired or about to expire.
+
+    Decodes the ``exp`` claim (without signature verification) and
+    compares against the current time.
+    """
+    claims = _extract_jwt_claims(token)
+    exp = claims.get("exp")
+    if not exp:
+        return  # No exp claim — can't check, proceed optimistically
+    remaining = int(exp) - int(time.time())
+    if remaining <= 0:
+        _error(
+            f"Okta token EXPIRED {-remaining // 60} min ago. "
+            "Get a fresh token from browser DevTools and re-export OKTA_TOKEN."
+        )
+    elif remaining < _MIN_TOKEN_LIFETIME:
+        _error(
+            f"Okta token expires in {remaining}s (~{remaining // 60} min) — "
+            f"not enough time for a scan. "
+            "Get a fresh token from browser DevTools and re-export OKTA_TOKEN."
+        )
+    else:
+        _info(f"  Token expires in {remaining // 60} min", quiet)
+
+
 def _resolve_auth_token(auth_cfg: dict, quiet: bool = False) -> Optional[str]:
     """Resolve an auth token from environment or refresh command.
 
     Returns the token string, or None if auth is not configured.
+    Aborts if the token is expired or expires within 5 minutes.
     """
     auth_type = auth_cfg.get("type", "none")
     if auth_type == "none":
@@ -173,6 +204,7 @@ def _resolve_auth_token(auth_cfg: dict, quiet: bool = False) -> Optional[str]:
                 token = result.stdout.strip()
                 if token.lower().startswith("bearer "):
                     token = token[7:].strip()
+                _check_token_expiry(token, quiet)
                 _info(f"  Auth: refreshed token via '{refresh_cmd}'", quiet)
                 return token
             else:
@@ -190,6 +222,7 @@ def _resolve_auth_token(auth_cfg: dict, quiet: bool = False) -> Optional[str]:
             # Strip "Bearer " prefix if the user pasted the full header value
             if token.lower().startswith("bearer "):
                 token = token[7:].strip()
+            _check_token_expiry(token, quiet)
             _info(f"  Auth: using token from ${token_env}", quiet)
             return token
         _error(
