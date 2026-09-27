@@ -3,7 +3,7 @@
         hydra-dev hydra-dev-down hydra-dev-logs hydra-dev-restart hydra-dev-attach \
         hydra-prod hydra-prod-down hydra-prod-logs \
         hydra-garak-shell hydra-garak-logs hydra-garak-health \
-        scan scan-dry scan-validate scan-nexus scan-nexus-dry scan-nexus-validate scan-health
+        scan scan-bg scan-dry scan-validate scan-health
 
 # Default target
 .DEFAULT_GOAL := help
@@ -248,23 +248,22 @@ hydra-garak-health: ## Check garak service health
 # CLI Scanning Commands
 # =============================================================================
 # Usage:
-#   make scan PLAN=scan_plans/nexus-test.yaml          Run a scan plan
-#   make scan-dry PLAN=scan_plans/nexus-test.yaml      Dry run (preview)
-#   make scan-validate PLAN=scan_plans/nexus-test.yaml Validate only
-#   make scan-nexus                                     Run Nexus scan (shortcut)
-#   make scan-nexus-dry                                 Dry run Nexus scan
+#   make scan PLAN=scan_plans/examples/rest-test.yaml    Run a scan plan
+#   make scan-dry PLAN=scan_plans/examples/rest-test.yaml  Dry run (preview)
+#   make scan-validate PLAN=scan_plans/examples/rest-test.yaml  Validate only
 #
 # For Okta-protected targets, set the token first:
 #   export OKTA_TOKEN="eyJ..."
-#   make scan-nexus
+#   export AUTH_COOKIE="<cookie-value>"   (optional, for session-pinned APIs)
+#   make scan PLAN=path/to/plan.yaml
 
 # Default plan file (override with: make scan PLAN=path/to/plan.yaml)
-PLAN ?= scan_plans/nexus-test.yaml
+PLAN ?= scan_plans/examples/rest-test.yaml
 
 # CLI runner (passes env vars into the container)
 CLI_RUN = $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml run --rm \
 	-e OKTA_TOKEN \
-	-e NEXUS_COOKIE \
+	-e AUTH_COOKIE \
 	--entrypoint python cli hydra_scan.py
 
 scan: ## Run a scan plan (PLAN=path/to/plan.yaml)
@@ -290,105 +289,6 @@ scan-validate: ## Validate a scan plan (PLAN=path/to/plan.yaml)
 	@if [ -z "$(PLAN)" ]; then echo "$(RED)Error: PLAN is required.$(NC)"; exit 1; fi
 	@echo "$(BLUE)Validating: $(PLAN)$(NC)"
 	$(CLI_RUN) validate --plan $(PLAN)
-
-NEXUS_LOG = nexus-scan-$(shell date +%Y%m%d-%H%M%S).log
-
-scan-nexus-quick: ## Quick Nexus smoke test (~5 min, 3 probes) — verify pipeline works
-	@if [ -z "$$OKTA_TOKEN" ]; then \
-		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
-		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
-		echo "$(YELLOW)  2. Open DevTools > Network > copy Authorization token$(NC)"; \
-		echo "$(YELLOW)  3. Copy ARRAffinity cookie from response headers$(NC)"; \
-		echo "$(YELLOW)  4. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
-		echo "$(YELLOW)  5. export NEXUS_COOKIE=\"ARRAffinity=...\"$(NC)"; \
-		echo "$(YELLOW)  6. make scan-nexus-quick$(NC)"; \
-		exit 1; \
-	fi
-	@echo "$(BLUE)Running Nexus quick smoke test (3 probes, ~5 min)...$(NC)"
-	$(CLI_RUN) run --plan scan_plans/nexus-quick.yaml
-	@echo "$(GREEN)✓ Quick scan complete. Reports in hydra_reports/nexus/$(NC)"
-
-scan-nexus-full: ## Run ALL probes with resume support (handles token expiry automatically)
-	@if [ -z "$$OKTA_TOKEN" ]; then \
-		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
-		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
-		echo "$(YELLOW)  2. Open DevTools > Network > copy Authorization token$(NC)"; \
-		echo "$(YELLOW)  3. Copy ARRAffinity cookie from response headers$(NC)"; \
-		echo "$(YELLOW)  4. export OKTA_TOKEN=\"Bearer eyJ...\"$(NC)"; \
-		echo "$(YELLOW)  5. export NEXUS_COOKIE=\"ARRAffinity=...\"$(NC)"; \
-		echo "$(YELLOW)  6. make scan-nexus-full$(NC)"; \
-		exit 1; \
-	fi
-	@echo "$(BLUE)Running full Nexus scan with resume support...$(NC)"
-	@echo "$(YELLOW)  Probes run one at a time. Token expiry is handled automatically.$(NC)"
-	@echo "$(YELLOW)  If stopped, re-run this command to resume from where you left off.$(NC)"
-	$(CLI_RUN) run --plan scan_plans/nexus-full.yaml --resume
-	@echo "$(GREEN)✓ Full scan complete. Reports in hydra_reports/nexus/$(NC)"
-
-scan-nexus: ## Run Nexus full scan (~30-60 min, requires OKTA_TOKEN + NEXUS_COOKIE)
-	@if [ -z "$$OKTA_TOKEN" ]; then \
-		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
-		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
-		echo "$(YELLOW)  2. Open DevTools > Network > copy Authorization token$(NC)"; \
-		echo "$(YELLOW)  3. Copy ARRAffinity cookie from response headers$(NC)"; \
-		echo "$(YELLOW)  4. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
-		echo "$(YELLOW)  5. export NEXUS_COOKIE=\"ARRAffinity=...\"$(NC)"; \
-		echo "$(YELLOW)  6. make scan-nexus$(NC)"; \
-		exit 1; \
-	fi
-	@echo "$(BLUE)Running Nexus scan (Okta auth)...$(NC)"
-	$(CLI_RUN) run --plan scan_plans/nexus-test.yaml
-	@echo "$(GREEN)✓ Nexus scan complete. Reports in cli_reports/nexus/$(NC)"
-
-scan-nexus-bg: ## Run Nexus scan in background (survives terminal disconnect)
-	@if [ -z "$$OKTA_TOKEN" ]; then \
-		echo "$(RED)Error: OKTA_TOKEN is not set.$(NC)"; \
-		echo "$(YELLOW)  1. Log in to Nexus via Okta in your browser$(NC)"; \
-		echo "$(YELLOW)  2. Open DevTools > Network > copy Authorization token$(NC)"; \
-		echo "$(YELLOW)  3. Copy ARRAffinity cookie from response headers$(NC)"; \
-		echo "$(YELLOW)  4. export OKTA_TOKEN=\"eyJ...\"$(NC)"; \
-		echo "$(YELLOW)  5. export NEXUS_COOKIE=\"ARRAffinity=...\"$(NC)"; \
-		echo "$(YELLOW)  6. make scan-nexus-bg$(NC)"; \
-		exit 1; \
-	fi
-	@echo "$(BLUE)Starting Nexus scan in background...$(NC)"
-	@nohup $(CLI_RUN) run --plan scan_plans/nexus-test.yaml \
-		> $(NEXUS_LOG) 2>&1 &
-	@echo "$(GREEN)✓ Scan running in background (PID $$!)$(NC)"
-	@echo "$(YELLOW)  Log:    tail -f $(NEXUS_LOG)$(NC)"
-	@echo "$(YELLOW)  Status: make scan-nexus-status$(NC)"
-	@echo "$(YELLOW)  Stop:   make scan-nexus-stop$(NC)"
-
-scan-nexus-status: ## Check if a background Nexus scan is still running
-	@if pgrep -f "hydra_scan.py run --plan scan_plans/nexus-test" > /dev/null 2>&1; then \
-		echo "$(GREEN)Nexus scan is running (PID $$(pgrep -f 'hydra_scan.py run --plan scan_plans/nexus-test'))$(NC)"; \
-		echo "$(YELLOW)  Latest log lines:$(NC)"; \
-		tail -5 $$(ls -t nexus-scan-*.log 2>/dev/null | head -1) 2>/dev/null || echo "  (no log file found)"; \
-	else \
-		echo "$(YELLOW)No Nexus scan running.$(NC)"; \
-		LATEST=$$(ls -t nexus-scan-*.log 2>/dev/null | head -1); \
-		if [ -n "$$LATEST" ]; then \
-			echo "$(BLUE)Last log: $$LATEST$(NC)"; \
-			echo "$(YELLOW)  Last lines:$(NC)"; \
-			tail -10 "$$LATEST"; \
-		fi; \
-	fi
-
-scan-nexus-stop: ## Stop a running background Nexus scan
-	@if pgrep -f "hydra_scan.py run --plan scan_plans/nexus-test" > /dev/null 2>&1; then \
-		pkill -f "hydra_scan.py run --plan scan_plans/nexus-test"; \
-		echo "$(YELLOW)Nexus scan stopped.$(NC)"; \
-	else \
-		echo "$(YELLOW)No Nexus scan running.$(NC)"; \
-	fi
-
-scan-nexus-dry: ## Dry run Nexus scan — preview targets and auth status
-	@echo "$(BLUE)Dry run: Nexus scan$(NC)"
-	$(CLI_RUN) run --plan scan_plans/nexus-test.yaml --dry-run
-
-scan-nexus-validate: ## Validate Nexus scan plan
-	@echo "$(BLUE)Validating Nexus scan plan...$(NC)"
-	$(CLI_RUN) validate --plan scan_plans/nexus-test.yaml
 
 scan-health: ## Check backend health before scanning
 	@echo "$(BLUE)Checking scan prerequisites...$(NC)"

@@ -1630,7 +1630,7 @@ class TestInjectAuthHeaders:
         assert config["rest_headers"]["User-Agent"] == "custom-agent/1.0"
 
     def test_injects_cookie_from_env(self, monkeypatch):
-        monkeypatch.setenv("NEXUS_COOKIE", "ARRAffinity=abc123")
+        monkeypatch.setenv("AUTH_COOKIE", "ARRAffinity=abc123")
         config = {}
         _inject_auth_headers(config, {"type": "okta"}, "tok")
         cookie = config["rest_headers"]["Cookie"]
@@ -1638,13 +1638,13 @@ class TestInjectAuthHeaders:
         assert "ARRAffinitySameSite=abc123" in cookie
 
     def test_no_cookie_when_env_not_set(self, monkeypatch):
-        monkeypatch.delenv("NEXUS_COOKIE", raising=False)
+        monkeypatch.delenv("AUTH_COOKIE", raising=False)
         config = {}
         _inject_auth_headers(config, {"type": "okta"}, "tok")
         assert "Cookie" not in config["rest_headers"]
 
     def test_preserves_existing_cookie_header(self, monkeypatch):
-        monkeypatch.setenv("NEXUS_COOKIE", "ARRAffinity=from-env")
+        monkeypatch.setenv("AUTH_COOKIE", "ARRAffinity=from-env")
         config = {"rest_headers": {"Cookie": "existing=cookie"}}
         _inject_auth_headers(config, {"type": "okta"}, "tok")
         assert config["rest_headers"]["Cookie"] == "existing=cookie"
@@ -1659,7 +1659,7 @@ class TestInjectAuthHeaders:
     def test_strips_set_cookie_metadata(self, monkeypatch):
         """Full Set-Cookie header pasted into env should be cleaned."""
         raw = "ARRAffinity=abc123;Path=/;HttpOnly;Secure;Domain=example.com"
-        monkeypatch.setenv("NEXUS_COOKIE", raw)
+        monkeypatch.setenv("AUTH_COOKIE", raw)
         config = {}
         _inject_auth_headers(config, {"type": "okta"}, "tok")
         cookie = config["rest_headers"]["Cookie"]

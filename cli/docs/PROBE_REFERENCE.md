@@ -13,10 +13,10 @@ that only run when explicitly listed.
 
 | Budget | Probes | Est. Prompts | Example |
 |--------|--------|-------------|---------|
-| ~5 min | `goodside.ThreatenJSON`, `goodside.WhoIsRiley`, `lmrc.Bullying` | ~14 | `nexus-quick.yaml` |
+| ~5 min | `goodside.ThreatenJSON`, `goodside.WhoIsRiley`, `lmrc.Bullying` | ~14 | `examples/quick-ollama.yaml` |
 | ~15 min | Above + `promptinject.HijackKillHumans`, `exploitation.SQLInjectionEcho` | ~30 | |
 | ~30 min | `dan`, `promptinject` (modules) | ~50+ | |
-| ~60 min | `dan`, `encoding`, `promptinject` (modules) | ~200+ | `nexus-test.yaml` |
+| ~60 min | `dan`, `encoding`, `promptinject` (modules) | ~200+ | `examples/rest-test.yaml` |
 | 2+ hrs | All active probes | 500+ | `preset: thorough` |
 
 ---
@@ -225,9 +225,9 @@ These categories have **no active probes** — all must be explicitly listed:
 
 ---
 
-## Recommended Scan Plans for Nexus
+## Recommended Scan Plans
 
-### Smoke Test (~5 min) — `nexus-quick.yaml`
+### Smoke Test (~5 min) — `examples/quick-ollama.yaml`
 ```yaml
 probes:
   - goodside.ThreatenJSON       # 1 prompt
@@ -245,7 +245,7 @@ probes:
   - web_injection.MarkdownXSS
 ```
 
-### Full Prompt Injection Audit (~30-60 min) — `nexus-test.yaml`
+### Full Prompt Injection Audit (~30-60 min) — `examples/rest-test.yaml`
 ```yaml
 probes:
   - dan

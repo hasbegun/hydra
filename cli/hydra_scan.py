@@ -317,9 +317,9 @@ def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
 
     Also injects:
     - Content-Type (garak uses ``data=`` not ``json=``, so no auto header)
-    - Cookie from ``$NEXUS_COOKIE`` env var (Azure ARRAffinity session pinning)
+    - Cookie from ``$AUTH_COOKIE`` env var (session pinning, e.g. Azure ARRAffinity)
     - User-Agent default (some APIs validate this)
-    - All-Claims + X-User-* headers from Okta userinfo (Nexus requires these)
+    - All-Claims + X-User-* headers from Okta userinfo (if available)
     """
     header_name = auth_cfg.get("token_header", "Authorization")
     token_prefix = auth_cfg.get("token_prefix", "Bearer ")
@@ -334,7 +334,7 @@ def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
     # Users often paste the full Set-Cookie header value which includes
     # metadata like "Path=/;HttpOnly;Secure;Domain=...".  Strip those —
     # the Cookie request header only needs "name=value" pairs.
-    cookie_env = auth_cfg.get("cookie_env", "NEXUS_COOKIE")
+    cookie_env = auth_cfg.get("cookie_env", "AUTH_COOKIE")
     cookie_val = os.environ.get(cookie_env, "")
     if cookie_val and "Cookie" not in scan_config["rest_headers"]:
         scan_config["rest_headers"]["Cookie"] = _clean_cookie(cookie_val)
@@ -343,7 +343,7 @@ def _inject_auth_headers(scan_config: dict, auth_cfg: dict, token: str) -> None:
     scan_config["rest_headers"].setdefault("User-Agent", _DEFAULT_USER_AGENT)
 
     # Fetch user profile from Okta userinfo and inject All-Claims + X-User-*
-    # headers.  The Nexus API validates user identity via these headers.
+    # headers.  Some APIs validate user identity via these headers.
     jwt_claims = _extract_jwt_claims(token)
     issuer = jwt_claims.get("iss", "")
     userinfo = _fetch_okta_userinfo(token, issuer)
