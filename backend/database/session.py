@@ -23,7 +23,7 @@ from database.models import Base, DBMeta
 logger = logging.getLogger(__name__)
 
 # Current schema version — bump when models change
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 # Module-level engine and session factory (initialized by init_db)
 _engine = None
@@ -127,6 +127,15 @@ def get_db():
         yield session
     finally:
         session.close()
+
+
+def db_available() -> bool:
+    """Check if the database has been initialized.
+
+    Centralized check — use this instead of duplicating the logic
+    in individual service modules.
+    """
+    return _SessionFactory is not None
 
 
 class DatabaseSession:

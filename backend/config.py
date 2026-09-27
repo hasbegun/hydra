@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     # API Configuration
     max_concurrent_scans: int = 5
 
+    # Tenant Configuration
+    tenant_mode: str = "single"  # "single" (no auth) or "multi" (Anima JWT required)
+
+    # Redis Configuration
+    redis_url: str = "redis://redis:6379/0"          # Broker (task queue)
+    redis_result_url: str = "redis://redis:6379/1"   # Result backend
+
     @property
     def garak_reports_path(self) -> Path:
         """Get the garak reports directory path"""

@@ -26,6 +26,8 @@ services:
       --reload-dir /app/services
       --reload-dir /app/models
       --reload-dir /app/database
+      --reload-dir /app/middleware
+      --reload-dir /app/tasks
 
     # Override depends_on to not require healthcheck in dev
     depends_on:
@@ -60,6 +62,8 @@ services:
       - ./services:/app/services:cached
       - ./models:/app/models:cached
       - ./database:/app/database:cached
+      - ./middleware:/app/middleware:cached
+      - ./tasks:/app/tasks:cached
       - ./config.py:/app/config.py:cached
       - ./main.py:/app/main.py:cached
       # Mount tests for `make test`

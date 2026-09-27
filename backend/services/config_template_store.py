@@ -27,13 +27,7 @@ def _slug(name: str) -> str:
     return re.sub(r"[^\w-]", "_", name.strip().lower())
 
 
-def _db_available() -> bool:
-    """Check if the database has been initialized."""
-    try:
-        from database.session import _SessionFactory
-        return _SessionFactory is not None
-    except ImportError:
-        return False
+from database.session import db_available as _db_available
 
 
 class ConfigTemplateStore:

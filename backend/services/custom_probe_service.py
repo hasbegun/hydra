@@ -29,13 +29,7 @@ from models.schemas import (
 logger = logging.getLogger(__name__)
 
 
-def _db_available() -> bool:
-    """Check if the database has been initialized."""
-    try:
-        from database.session import _SessionFactory
-        return _SessionFactory is not None
-    except ImportError:
-        return False
+from database.session import db_available as _db_available
 
 
 class CustomProbeService:

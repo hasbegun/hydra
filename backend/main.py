@@ -10,6 +10,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from api.routes import scan, plugins, config, system, custom_probes, workflow, models
 from config import settings
+from middleware.tenant import TenantMiddleware
 from logging_config import setup_logging
 from services.model_discovery import initialize_model_discovery
 import logging
@@ -109,6 +110,9 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Add request logging middleware with timing
 app.add_middleware(RequestLoggingMiddleware)
+
+# Add tenant isolation middleware (extracts TenantContext from JWT)
+app.add_middleware(TenantMiddleware, tenant_mode=settings.tenant_mode)
 
 # Include routers
 app.include_router(scan.router, prefix="/api/v1/scan", tags=["Scan"])

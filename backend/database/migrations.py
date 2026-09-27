@@ -210,6 +210,20 @@ def _add_column_if_missing(engine, table: str, column: str, col_type: str) -> bo
     return True
 
 
+def _backfill_tenant_id(engine, table: str) -> None:
+    """Set tenant_id = 'default' for any existing rows that have NULL tenant_id.
+
+    Idempotent — safe to call on every startup.
+    """
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        result = conn.execute(
+            text(f"UPDATE {table} SET tenant_id = 'default' WHERE tenant_id IS NULL")
+        )
+        if result.rowcount > 0:
+            logger.info(f"Backfilled {result.rowcount} rows in {table} with tenant_id='default'")
+
+
 def _run_schema_migrations(engine) -> None:
     """Apply incremental schema changes for existing databases.
 
@@ -220,6 +234,11 @@ def _run_schema_migrations(engine) -> None:
     _add_column_if_missing(engine, "scans", "html_report_key", "VARCHAR")
     # H1.1: materialized probe stats
     _add_column_if_missing(engine, "scans", "probe_stats_json", "TEXT")
+
+    # Phase 1: tenant_id on all entity tables
+    for table in ("scans", "config_templates", "custom_probes"):
+        if _add_column_if_missing(engine, table, "tenant_id", "VARCHAR DEFAULT 'default'"):
+            _backfill_tenant_id(engine, table)
 
 
 def run_backfill_if_needed() -> None:

@@ -24,6 +24,7 @@ class Scan(Base):
     __tablename__ = "scans"
 
     id = Column(String, primary_key=True)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
     target_type = Column(String, nullable=False, default="unknown")
     target_name = Column(String, nullable=False, default="unknown")
     status = Column(String, nullable=False, default="pending")
@@ -46,6 +47,8 @@ class Scan(Base):
         Index("idx_scans_status", "status"),
         Index("idx_scans_target", "target_type", "target_name"),
         Index("idx_scans_started", "started_at"),
+        Index("idx_scans_tenant", "tenant_id"),
+        Index("idx_scans_tenant_status", "tenant_id", "status"),
     )
 
     def to_dict(self):
@@ -60,6 +63,7 @@ class Scan(Base):
                 pass
         return {
             "scan_id": self.id,
+            "tenant_id": self.tenant_id or "default",
             "status": self.status,
             "target_type": self.target_type,
             "target_name": self.target_name,
@@ -83,6 +87,7 @@ class ConfigTemplateRow(Base):
     __tablename__ = "config_templates"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
     name = Column(String, unique=True, nullable=False)
     description = Column(Text, nullable=True)
     config_json = Column(Text, nullable=False)
@@ -106,6 +111,7 @@ class CustomProbeRow(Base):
     __tablename__ = "custom_probes"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
     name = Column(String, unique=True, nullable=False)
     description = Column(Text, nullable=True)
     file_path = Column(String, nullable=False)
