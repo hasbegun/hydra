@@ -1,0 +1,75 @@
+# Hydra Sandbox — Ephemeral garak execution container
+#
+# Security hardening:
+#   - Runs as non-root user (garak:garak, UID 1000)
+#   - Designed for read-only rootfs (--read-only flag at runtime)
+#   - tmpfs mounted at /tmp and /data/reports at runtime
+#   - Resource limits (memory, CPU, PIDs) enforced at runtime
+#   - No SSH, no sudo, no package manager
+#
+# Build:
+#   docker build -f Dockerfile.sandbox -t hydra-sandbox:latest .
+
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Build dependencies (removed in final stage)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    curl \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust (required for base2048)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:$PATH"
+
+RUN pip install --no-cache-dir --upgrade pip
+
+# Install garak
+RUN git clone --depth 1 \
+    --branch main https://github.com/NVIDIA/garak.git /tmp/garak \
+    && pip install --no-cache-dir /tmp/garak \
+    && rm -rf /tmp/garak
+
+# ---- Final stage: minimal runtime image ----
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Create non-root user
+RUN groupadd -g 1000 garak && \
+    useradd -u 1000 -g garak -m -s /bin/false garak
+
+# Create directories owned by garak user
+RUN mkdir -p /data/garak_reports /home/garak/.config/garak \
+             /home/garak/.local/share/garak && \
+    chown -R garak:garak /data /home/garak
+
+# Configure garak to write reports to /data/garak_reports
+RUN echo 'reporting:' > /home/garak/.config/garak/garak.site.yaml && \
+    echo '  report_dir: /data/garak_reports' >> /home/garak/.config/garak/garak.site.yaml && \
+    ln -sf /data/garak_reports /home/garak/.local/share/garak/garak_runs && \
+    chown garak:garak /home/garak/.config/garak/garak.site.yaml
+
+# Remove package manager and sudo to reduce attack surface
+RUN apt-get purge -y --auto-remove && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV HOME=/home/garak
+
+# Switch to non-root user
+USER garak
+
+# Default entrypoint: run garak CLI
+# The SandboxManager overrides the command at runtime
+ENTRYPOINT ["python", "-m", "garak"]

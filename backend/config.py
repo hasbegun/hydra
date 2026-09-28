@@ -61,6 +61,18 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"          # Broker (task queue)
     redis_result_url: str = "redis://redis:6379/1"   # Result backend
 
+    # Sandbox Configuration
+    sandbox_enabled: bool = True                      # Enable sandboxed scan execution
+    sandbox_image: str = "hydra-sandbox:latest"       # Docker image for sandbox containers
+    sandbox_memory_limit: str = "2g"                  # Container memory limit
+    sandbox_cpu_count: int = 2                        # CPU core limit
+    sandbox_pids_limit: int = 256                     # Max PIDs inside container
+    sandbox_timeout_seconds: int = 3600               # Hard timeout (1 hour default)
+    sandbox_grace_seconds: int = 30                   # Grace period before SIGKILL
+    sandbox_tmpfs_size: str = "512m"                  # tmpfs size for /tmp
+    sandbox_reports_dir: str = "/data/garak_reports"  # Host dir for extracted reports
+    sandbox_network_mode: str = "none"                # Default network mode (none = isolated)
+
     @property
     def garak_reports_path(self) -> Path:
         """Get the garak reports directory path"""
