@@ -1,0 +1,54 @@
+# Hydra Celery Worker
+#
+# Runs Celery workers that execute scan tasks. Needs access to:
+#   - Redis (broker + result backend)
+#   - PostgreSQL (scan state persistence)
+#   - Docker socket (to create sandbox containers)
+#
+# Build:
+#   docker build -f Dockerfile.worker -t hydra-worker:latest .
+#
+# Run (mount Docker socket for sandbox access):
+#   docker run --rm \
+#     -v /var/run/docker.sock:/var/run/docker.sock \
+#     -e REDIS_URL=redis://redis:6379/0 \
+#     -e DATABASE_URL=postgresql://hydra:secret@postgres:5432/hydra \
+#     hydra-worker:latest
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System dependencies: libpq for psycopg2, curl for healthchecks
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir --upgrade pip
+
+# Install Python dependencies (same as backend + docker SDK)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code (tasks, database, config, services)
+COPY . .
+
+# Reports directory
+RUN mkdir -p /data/garak_reports
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV GARAK_REPORTS_DIR=/data/garak_reports
+
+# Healthcheck: verify worker responds to ping
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD celery -A tasks inspect ping --timeout 5.0 || exit 1
+
+# Default: start a worker consuming all three queues.
+# Override CMD to target specific queues, e.g.:
+#   celery -A tasks worker -Q express --concurrency=4
+CMD ["celery", "-A", "tasks", "worker", \
+     "--loglevel=info", \
+     "--concurrency=2", \
+     "-Q", "express,default,background"]

@@ -505,8 +505,10 @@ class GarakWrapper:
             except Exception as e:
                 logger.warning(f"DB lookup failed for scan {scan_id}, falling back to file: {e}")
 
-        # Fallback: check historical scans on disk (no tenant scoping for file-based)
-        if self.garak_reports_dir.exists():
+        # Fallback: check historical scans on disk.
+        # File-based reports have no tenant metadata, so when tenant_id is
+        # specified we skip the fallback to avoid cross-tenant data leaks.
+        if not tenant_id and self.garak_reports_dir.exists():
             report_file = self.garak_reports_dir / f"garak.{scan_id}.report.jsonl"
             if report_file.exists():
                 return self._parse_report_file(report_file, scan_id)
@@ -521,7 +523,7 @@ class GarakWrapper:
             tenant_id: If provided, only delete if the scan belongs to this
                        tenant (access control).
         """
-        # Tenant access check
+        # Tenant access check — fail closed: deny if ownership cannot be verified
         if tenant_id:
             scan_info = self.active_scans.get(scan_id)
             if scan_info and scan_info.get("tenant_id", "default") != tenant_id:
@@ -535,7 +537,9 @@ class GarakWrapper:
                         if row and row.tenant_id != tenant_id:
                             return False
                 except Exception:
-                    pass
+                    # Cannot verify ownership — deny access
+                    logger.warning(f"Tenant check failed for scan {scan_id} delete, denying")
+                    return False
 
         # Invalidate cache
         self.invalidate_cache(scan_id)
@@ -629,7 +633,12 @@ class GarakWrapper:
             except Exception as e:
                 logger.warning(f"DB query failed for scan list, falling back to files: {e}")
 
-        # Fallback: historical scans from reports directory
+        # Fallback: historical scans from reports directory.
+        # File-based reports have no tenant metadata, so when tenant_id is
+        # specified we skip the fallback to avoid cross-tenant data leaks.
+        if tenant_id:
+            return sorted(all_scans, key=lambda x: x.get("started_at", ""), reverse=True)
+
         if not self.garak_reports_dir.exists():
             logger.warning(f"Reports directory not found: {self.garak_reports_dir}")
             return sorted(all_scans, key=lambda x: x.get("started_at", ""), reverse=True)

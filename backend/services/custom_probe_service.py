@@ -31,6 +31,215 @@ logger = logging.getLogger(__name__)
 
 from database.session import db_available as _db_available
 
+# ---------------------------------------------------------------------------
+# Probe validation
+# ---------------------------------------------------------------------------
+
+# Maximum probe file size (bytes). Probes larger than this are rejected
+# outright without parsing.
+MAX_PROBE_SIZE_BYTES = 50 * 1024  # 50 KB
+
+# Modules that are blocked unconditionally. Importing any of these produces
+# a validation **error** (not a warning) and the probe is rejected.
+BLOCKED_MODULES = frozenset({
+    "os",
+    "subprocess",
+    "socket",
+    "importlib",
+    "shutil",
+})
+
+# Built-in functions that are blocked when called directly.
+BLOCKED_BUILTINS = frozenset({
+    "eval",
+    "exec",
+    "__import__",
+    "compile",
+})
+
+
+class ProbeValidator:
+    """AST-based security validator for custom probe code.
+
+    This class is intentionally stateless so it can be unit-tested
+    without any filesystem or database side effects.
+    """
+
+    @staticmethod
+    def validate(code: str) -> CustomProbeValidationResponse:
+        """Run all validation checks and return a structured response."""
+        errors: List[ValidationError] = []
+        warnings: List[str] = []
+        probe_info: Dict[str, Any] = {}
+
+        # --- 0. Size check (before parsing) ---
+        if len(code.encode("utf-8")) > MAX_PROBE_SIZE_BYTES:
+            size_kb = len(code.encode("utf-8")) / 1024
+            return CustomProbeValidationResponse(
+                valid=False,
+                errors=[ValidationError(
+                    line=None,
+                    column=None,
+                    message=(
+                        f"Probe file is {size_kb:.1f} KB, exceeding the "
+                        f"{MAX_PROBE_SIZE_BYTES // 1024} KB limit."
+                    ),
+                    error_type="size",
+                )],
+            )
+
+        # --- 1. Syntax check ---
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as e:
+            return CustomProbeValidationResponse(
+                valid=False,
+                errors=[ValidationError(
+                    line=e.lineno,
+                    column=e.offset,
+                    message=str(e.msg),
+                    error_type="syntax",
+                )],
+            )
+
+        # --- 2. Blocked imports ---
+        ProbeValidator._check_blocked_imports(tree, errors)
+
+        # --- 3. Blocked builtins (eval, exec, __import__, compile) ---
+        ProbeValidator._check_blocked_calls(tree, errors)
+
+        # --- 4. Garak import presence (warning only) ---
+        has_garak_import = ProbeValidator._has_garak_import(tree)
+        if not has_garak_import:
+            warnings.append(
+                "No garak imports found. Make sure to import garak.probes.base"
+            )
+
+        # --- 5. Probe class with Probe inheritance ---
+        probe_classes = ProbeValidator._find_probe_classes(tree)
+        if not probe_classes:
+            errors.append(ValidationError(
+                line=None,
+                column=None,
+                message=(
+                    "No class inheriting from Probe found. "
+                    "Probe must inherit from garak.probes.base.Probe."
+                ),
+                error_type="structure",
+            ))
+        else:
+            probe_info["classes"] = probe_classes
+            ProbeValidator._extract_probe_attributes(tree, probe_info)
+
+        is_valid = len(errors) == 0
+        return CustomProbeValidationResponse(
+            valid=is_valid,
+            errors=errors,
+            warnings=warnings,
+            probe_info=probe_info if is_valid else None,
+        )
+
+    # --- Internal helpers ---------------------------------------------------
+
+    @staticmethod
+    def _check_blocked_imports(tree: ast.AST, errors: List[ValidationError]) -> None:
+        """Reject imports of blocked modules."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                # Block both "import os" and "from os import path"
+                root_module = node.module.split(".")[0]
+                if root_module in BLOCKED_MODULES:
+                    errors.append(ValidationError(
+                        line=node.lineno,
+                        column=node.col_offset,
+                        message=f"Import of blocked module '{node.module}' is not allowed.",
+                        error_type="security",
+                    ))
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    root_module = alias.name.split(".")[0]
+                    if root_module in BLOCKED_MODULES:
+                        errors.append(ValidationError(
+                            line=node.lineno,
+                            column=node.col_offset,
+                            message=f"Import of blocked module '{alias.name}' is not allowed.",
+                            error_type="security",
+                        ))
+
+    @staticmethod
+    def _check_blocked_calls(tree: ast.AST, errors: List[ValidationError]) -> None:
+        """Reject direct calls to eval(), exec(), __import__(), compile()."""
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = None
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name and name in BLOCKED_BUILTINS:
+                errors.append(ValidationError(
+                    line=node.lineno,
+                    column=node.col_offset,
+                    message=f"Call to '{name}()' is not allowed.",
+                    error_type="security",
+                ))
+
+    @staticmethod
+    def _has_garak_import(tree: ast.AST) -> bool:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module and "garak" in node.module:
+                    return True
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if "garak" in alias.name:
+                        return True
+        return False
+
+    @staticmethod
+    def _find_probe_classes(tree: ast.AST) -> List[Dict[str, Any]]:
+        """Find classes that inherit from something containing 'Probe'."""
+        probe_classes = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef) or not node.bases:
+                continue
+            for base in node.bases:
+                base_name = ProbeValidator._base_name(base)
+                if base_name and "Probe" in base_name:
+                    probe_classes.append({
+                        "name": node.name,
+                        "line": node.lineno,
+                        "docstring": ast.get_docstring(node),
+                        "has_bases": True,
+                    })
+                    break  # Don't double-count if multiple bases match
+        return probe_classes
+
+    @staticmethod
+    def _base_name(node: ast.expr) -> Optional[str]:
+        """Extract a readable name from a base class AST node."""
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            return node.attr
+        return None
+
+    @staticmethod
+    def _extract_probe_attributes(tree: ast.AST, probe_info: Dict[str, Any]) -> None:
+        """Extract well-known probe attributes (prompts, goal, etc.)."""
+        known_attrs = {"prompts", "goal", "primary_detector", "tags"}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for item in node.body:
+                if not isinstance(item, ast.Assign):
+                    continue
+                for target in item.targets:
+                    if isinstance(target, ast.Name) and target.id in known_attrs:
+                        probe_info[f"has_{target.id}"] = True
+
 
 class CustomProbeService:
     """Service for managing custom probes"""
@@ -85,101 +294,12 @@ class CustomProbeService:
         return name.isidentifier() and not name.startswith('_')
 
     def validate_code(self, request: CustomProbeValidateRequest) -> CustomProbeValidationResponse:
-        """Validate probe code"""
-        code = request.code
-        errors = []
-        warnings = []
-        probe_info = {}
+        """Validate probe code.
 
-        # 1. Check syntax
-        try:
-            tree = ast.parse(code)
-        except SyntaxError as e:
-            return CustomProbeValidationResponse(
-                valid=False,
-                errors=[ValidationError(
-                    line=e.lineno,
-                    column=e.offset,
-                    message=str(e.msg),
-                    error_type="syntax"
-                )]
-            )
-
-        # 2. Check for imports
-        has_garak_import = False
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                if isinstance(node, ast.ImportFrom):
-                    if node.module and 'garak' in node.module:
-                        has_garak_import = True
-                elif isinstance(node, ast.Import):
-                    for alias in node.names:
-                        if 'garak' in alias.name:
-                            has_garak_import = True
-
-        if not has_garak_import:
-            warnings.append("No garak imports found. Make sure to import garak.probes.base")
-
-        # 3. Find probe class
-        probe_classes = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                # Check if it inherits from something that looks like a probe
-                if node.bases:
-                    probe_classes.append({
-                        'name': node.name,
-                        'line': node.lineno,
-                        'docstring': ast.get_docstring(node),
-                        'has_bases': len(node.bases) > 0
-                    })
-
-        if not probe_classes:
-            errors.append(ValidationError(
-                line=None,
-                column=None,
-                message="No class definition found. Probe must be a class.",
-                error_type="structure"
-            ))
-        else:
-            probe_info['classes'] = probe_classes
-
-            # Extract probe attributes
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    for item in node.body:
-                        if isinstance(item, ast.Assign):
-                            for target in item.targets:
-                                if isinstance(target, ast.Name):
-                                    if target.id == 'prompts':
-                                        probe_info['has_prompts'] = True
-                                    elif target.id == 'goal':
-                                        probe_info['has_goal'] = True
-                                    elif target.id == 'primary_detector':
-                                        probe_info['has_primary_detector'] = True
-                                    elif target.id == 'tags':
-                                        probe_info['has_tags'] = True
-
-        # 4. Check for dangerous imports/operations
-        dangerous_modules = ['os', 'subprocess', 'shutil', 'socket']
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                if isinstance(node, ast.ImportFrom):
-                    if node.module in dangerous_modules:
-                        warnings.append(f"Warning: Import of potentially dangerous module '{node.module}'")
-                elif isinstance(node, ast.Import):
-                    for alias in node.names:
-                        if alias.name in dangerous_modules:
-                            warnings.append(f"Warning: Import of potentially dangerous module '{alias.name}'")
-
-        # Determine if valid
-        is_valid = len(errors) == 0
-
-        return CustomProbeValidationResponse(
-            valid=is_valid,
-            errors=errors,
-            warnings=warnings,
-            probe_info=probe_info if is_valid else None
-        )
+        Delegates to ``ProbeValidator.validate`` which performs all
+        security, structural, and size checks.
+        """
+        return ProbeValidator.validate(request.code)
 
     def create_probe(self, request: CustomProbeCreateRequest) -> CustomProbe:
         """Create a new custom probe"""
