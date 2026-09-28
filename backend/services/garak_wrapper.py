@@ -63,83 +63,54 @@ class GarakWrapper:
         """Write current scan state to the database (upsert).
 
         Called at key lifecycle points: start, complete, error, cancel, report.
+        Delegates to the shared ``database.scan_ops.upsert_scan`` to avoid
+        duplicating upsert logic with the Celery scan task.
         """
-        if not _db_available():
-            return
-
         if scan_info is None:
             scan_info = self.active_scans.get(scan_id)
         if not scan_info:
             return
 
-        try:
-            from database.session import get_db
-            from database.models import Scan
+        from database.scan_ops import upsert_scan
 
-            status = scan_info.get("status", ScanStatus.PENDING)
-            status_str = status.value if hasattr(status, "value") else str(status)
-            passed = scan_info.get("passed", 0)
-            failed = scan_info.get("failed", 0)
-            total = passed + failed
-            pass_rate = (passed / total * 100.0) if total > 0 else None
+        status = scan_info.get("status", ScanStatus.PENDING)
+        status_str = status.value if hasattr(status, "value") else str(status)
 
-            config = scan_info.get("config")
-            config_json = None
-            if config:
-                config_json = json.dumps(
-                    config.model_dump() if hasattr(config, "model_dump") else config
-                )
+        config = scan_info.get("config")
+        config_json = None
+        if config:
+            config_json = json.dumps(
+                config.model_dump() if hasattr(config, "model_dump") else config
+            )
 
-            with get_db() as db:
-                existing = db.query(Scan).filter_by(id=scan_id).first()
-                if existing:
-                    existing.status = status_str
-                    existing.started_at = scan_info.get("started_at") or scan_info.get("created_at") or existing.started_at
-                    existing.completed_at = scan_info.get("completed_at") or existing.completed_at
-                    existing.passed = passed
-                    existing.failed = failed
-                    existing.pass_rate = pass_rate
-                    existing.total_probes = scan_info.get("total_probes", existing.total_probes or 0)
-                    existing.error_message = scan_info.get("error_message") or existing.error_message
-                    existing.report_path = scan_info.get("jsonl_report_path") or existing.report_path
-                    existing.html_report_path = scan_info.get("html_report_path") or existing.html_report_path
-                    existing.report_key = scan_info.get("report_key") or existing.report_key
-                    existing.html_report_key = scan_info.get("html_report_key") or existing.html_report_key
-                    if config_json and not existing.config_json:
-                        existing.config_json = config_json
-                else:
-                    target_type = "unknown"
-                    target_name = "unknown"
-                    if config:
-                        cfg = config if isinstance(config, dict) else (
-                            config.model_dump() if hasattr(config, "model_dump") else {}
-                        )
-                        target_type = cfg.get("target_type", "unknown")
-                        target_name = cfg.get("target_name", "unknown")
+        target_type = "unknown"
+        target_name = "unknown"
+        if config:
+            cfg = config if isinstance(config, dict) else (
+                config.model_dump() if hasattr(config, "model_dump") else {}
+            )
+            target_type = cfg.get("target_type", "unknown")
+            target_name = cfg.get("target_name", "unknown")
 
-                    scan_row = Scan(
-                        id=scan_id,
-                        target_type=target_type,
-                        target_name=target_name,
-                        status=status_str,
-                        started_at=scan_info.get("started_at") or scan_info.get("created_at"),
-                        completed_at=scan_info.get("completed_at"),
-                        total_probes=scan_info.get("total_probes", 0),
-                        passed=passed,
-                        failed=failed,
-                        pass_rate=pass_rate,
-                        error_message=scan_info.get("error_message"),
-                        report_path=scan_info.get("jsonl_report_path"),
-                        html_report_path=scan_info.get("html_report_path"),
-                        report_key=scan_info.get("report_key"),
-                        html_report_key=scan_info.get("html_report_key"),
-                        config_json=config_json,
-                        created_at=scan_info.get("created_at"),
-                    )
-                    db.add(scan_row)
-                db.commit()
-        except Exception as e:
-            logger.warning(f"Failed to sync scan {scan_id} to DB: {e}")
+        upsert_scan(
+            scan_id,
+            tenant_id=scan_info.get("tenant_id", "default"),
+            status=status_str,
+            target_type=target_type,
+            target_name=target_name,
+            passed=scan_info.get("passed", 0),
+            failed=scan_info.get("failed", 0),
+            total_probes=scan_info.get("total_probes", 0),
+            error_message=scan_info.get("error_message"),
+            started_at=scan_info.get("started_at") or scan_info.get("created_at"),
+            completed_at=scan_info.get("completed_at"),
+            report_path=scan_info.get("jsonl_report_path"),
+            html_report_path=scan_info.get("html_report_path"),
+            report_key=scan_info.get("report_key"),
+            html_report_key=scan_info.get("html_report_key"),
+            config_json=config_json,
+            created_at=scan_info.get("created_at"),
+        )
 
     def _delete_scan_from_db(self, scan_id: str) -> None:
         """Remove a scan row from the database."""
@@ -204,8 +175,12 @@ class GarakWrapper:
             if s.get("status") in (ScanStatus.PENDING, ScanStatus.RUNNING)
         )
 
-    async def start_scan(self, config: ScanConfigRequest) -> str:
+    async def start_scan(self, config: ScanConfigRequest, tenant_id: str = "default") -> str:
         """Start a scan via the garak service.
+
+        Args:
+            config: Scan configuration.
+            tenant_id: Tenant that owns this scan.
 
         Raises MaxConcurrentScansError if the concurrent scan limit is reached.
         """
@@ -234,6 +209,7 @@ class GarakWrapper:
         total_probes = len(config.probes) if config.probes else 0
         self.active_scans[scan_id] = {
             "scan_id": scan_id,
+            "tenant_id": tenant_id,
             "status": ScanStatus.PENDING,
             "config": config,
             "progress": 0.0,
@@ -454,11 +430,21 @@ class GarakWrapper:
             logger.error(f"Error renaming report file {src} -> {dst}: {e}")
             return None
 
-    async def cancel_scan(self, scan_id: str) -> bool:
-        """Cancel a scan via the garak service."""
+    async def cancel_scan(self, scan_id: str, tenant_id: Optional[str] = None) -> bool:
+        """Cancel a scan via the garak service.
+
+        Args:
+            scan_id: Scan identifier.
+            tenant_id: If provided, only cancel if the scan belongs to this
+                       tenant (access control).
+        """
         scan_info = self.active_scans.get(scan_id)
         if not scan_info:
             logger.warning(f"Cannot cancel scan {scan_id}: not found")
+            return False
+
+        if tenant_id and scan_info.get("tenant_id", "default") != tenant_id:
+            logger.warning(f"Cannot cancel scan {scan_id}: tenant mismatch")
             return False
 
         if scan_info["status"] not in [ScanStatus.RUNNING, ScanStatus.PENDING]:
@@ -488,11 +474,20 @@ class GarakWrapper:
     # Report reading (object store → local filesystem fallback)
     # ------------------------------------------------------------------
 
-    def get_scan_status(self, scan_id: str) -> Optional[Dict[str, Any]]:
-        """Get current status of a scan (active or historical)."""
+    def get_scan_status(self, scan_id: str, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get current status of a scan (active or historical).
+
+        Args:
+            scan_id: Scan identifier.
+            tenant_id: If provided, only return the scan if it belongs to this
+                       tenant (access control). If None, no tenant check is
+                       performed (backward-compatible).
+        """
         # Check active scans first (real-time data)
         scan_info = self.active_scans.get(scan_id)
         if scan_info:
+            if tenant_id and scan_info.get("tenant_id", "default") != tenant_id:
+                return None
             return {k: v for k, v in scan_info.items() if k != "process"}
 
         # Check database for historical scans
@@ -501,13 +496,16 @@ class GarakWrapper:
                 from database.session import get_db
                 from database.models import Scan
                 with get_db() as db:
-                    row = db.query(Scan).filter_by(id=scan_id).first()
+                    query = db.query(Scan).filter_by(id=scan_id)
+                    if tenant_id:
+                        query = query.filter(Scan.tenant_id == tenant_id)
+                    row = query.first()
                     if row:
                         return row.to_dict()
             except Exception as e:
                 logger.warning(f"DB lookup failed for scan {scan_id}, falling back to file: {e}")
 
-        # Fallback: check historical scans on disk
+        # Fallback: check historical scans on disk (no tenant scoping for file-based)
         if self.garak_reports_dir.exists():
             report_file = self.garak_reports_dir / f"garak.{scan_id}.report.jsonl"
             if report_file.exists():
@@ -515,8 +513,30 @@ class GarakWrapper:
 
         return None
 
-    def delete_scan(self, scan_id: str) -> bool:
-        """Delete a scan and all its associated reports."""
+    def delete_scan(self, scan_id: str, tenant_id: Optional[str] = None) -> bool:
+        """Delete a scan and all its associated reports.
+
+        Args:
+            scan_id: Scan identifier.
+            tenant_id: If provided, only delete if the scan belongs to this
+                       tenant (access control).
+        """
+        # Tenant access check
+        if tenant_id:
+            scan_info = self.active_scans.get(scan_id)
+            if scan_info and scan_info.get("tenant_id", "default") != tenant_id:
+                return False
+            if not scan_info and _db_available():
+                try:
+                    from database.session import get_db
+                    from database.models import Scan
+                    with get_db() as db:
+                        row = db.query(Scan).filter_by(id=scan_id).first()
+                        if row and row.tenant_id != tenant_id:
+                            return False
+                except Exception:
+                    pass
+
         # Invalidate cache
         self.invalidate_cache(scan_id)
 
@@ -569,8 +589,13 @@ class GarakWrapper:
 
         return True
 
-    def get_all_scans(self) -> List[Dict[str, Any]]:
+    def get_all_scans(self, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get information about all scans (active and historical).
+
+        Args:
+            tenant_id: If provided, only return scans belonging to this tenant.
+                       If None, return all scans (backward-compatible for
+                       single-tenant mode).
 
         Active scans come from in-memory dict (real-time).
         Historical scans come from DB (fast indexed query).
@@ -581,6 +606,8 @@ class GarakWrapper:
 
         # Active scans (real-time data)
         for scan_info in self.active_scans.values():
+            if tenant_id and scan_info.get("tenant_id", "default") != tenant_id:
+                continue
             scan_copy = {k: v for k, v in scan_info.items() if k != "process"}
             all_scans.append(scan_copy)
             active_ids.add(scan_info.get("scan_id"))
@@ -591,7 +618,10 @@ class GarakWrapper:
                 from database.session import get_db
                 from database.models import Scan
                 with get_db() as db:
-                    rows = db.query(Scan).order_by(Scan.started_at.desc()).all()
+                    query = db.query(Scan)
+                    if tenant_id:
+                        query = query.filter(Scan.tenant_id == tenant_id)
+                    rows = query.order_by(Scan.started_at.desc()).all()
                     for row in rows:
                         if row.id not in active_ids:
                             all_scans.append(row.to_dict())
@@ -1270,13 +1300,15 @@ class GarakWrapper:
     # Aggregate statistics
     # ------------------------------------------------------------------
 
-    def get_scan_statistics(self, days: int = 30) -> Dict[str, Any]:
-        """Compute aggregate statistics across all scans.
+    def get_scan_statistics(self, days: int = 30, tenant_id: Optional[str] = None) -> Dict[str, Any]:
+        """Compute aggregate statistics across scans.
 
         Args:
             days: Number of days of daily trend data to return.
+            tenant_id: If provided, only include scans belonging to this
+                       tenant. If None, aggregate all scans.
         """
-        all_scans = self.get_all_scans()
+        all_scans = self.get_all_scans(tenant_id=tenant_id)
 
         # --- Counters ---
         status_counts: Dict[str, int] = {
