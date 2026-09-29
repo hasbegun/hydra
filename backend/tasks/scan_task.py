@@ -137,12 +137,15 @@ def execute_scan(
         "html_report_key": None,
     }
 
+    # Build a sanitized config for DB persistence (no credentials)
+    db_config = {k: v for k, v in config.items() if k != "credentials"}
+
     # Persist initial PENDING state
     _sync_scan_to_db(
         scan_id=scan_id,
         tenant_id=tenant_id,
         status="pending",
-        config_dict=config,
+        config_dict=db_config,
         started_at=started_at,
         total_probes=len(config.get("probes") or []),
     )
@@ -150,12 +153,25 @@ def execute_scan(
         "event_type": "status", "status": "pending", "scan_id": scan_id,
     })
 
+    # --- Step 0.5: Fetch target credentials from Prism (if target_id set) ---
+    injected_config = dict(config)  # shallow copy — credentials held only here
+    target_id = config.get("target_id")
+    if target_id:
+        try:
+            from services.target_service import get_target_service
+            creds = get_target_service().fetch_credentials(tenant_id, target_id)
+            if creds:
+                injected_config["credentials"] = creds
+                logger.info(f"Injected Prism credentials for target {target_id}")
+        except Exception as e:
+            logger.warning(f"Credential fetch failed for target {target_id}: {e}")
+
     # --- Step 1: Send scan config to garak service ---
     try:
         with httpx.Client(base_url=garak_service_url, timeout=30.0) as client:
             response = client.post(
                 "/scans",
-                json={"scan_id": scan_id, "config": config},
+                json={"scan_id": scan_id, "config": injected_config},
             )
             response.raise_for_status()
     except (httpx.HTTPStatusError, Exception) as e:
@@ -171,7 +187,7 @@ def execute_scan(
         _sync_scan_to_db(
             scan_id=scan_id, tenant_id=tenant_id, status="failed",
             error_message=error_msg, completed_at=scan_state["completed_at"],
-            config_dict=config, started_at=started_at,
+            config_dict=db_config, started_at=started_at,
         )
         _publish_progress(scan_id, tenant_id, {
             "event_type": "error", "message": error_msg, "scan_id": scan_id,
@@ -185,7 +201,7 @@ def execute_scan(
     scan_state["status"] = "running"
     _sync_scan_to_db(
         scan_id=scan_id, tenant_id=tenant_id, status="running",
-        config_dict=config, started_at=started_at,
+        config_dict=db_config, started_at=started_at,
     )
     _publish_progress(scan_id, tenant_id, {
         "event_type": "status", "status": "running", "scan_id": scan_id,
@@ -217,7 +233,7 @@ def execute_scan(
                             scan_id=scan_id, tenant_id=tenant_id, status="failed",
                             error_message=scan_state["error_message"],
                             completed_at=scan_state["completed_at"],
-                            config_dict=config, started_at=started_at,
+                            config_dict=db_config, started_at=started_at,
                         )
                         return scan_state
 
@@ -229,7 +245,7 @@ def execute_scan(
                         except json.JSONDecodeError:
                             continue
 
-                        _process_sse_event(scan_id, tenant_id, data, scan_state, config, started_at)
+                        _process_sse_event(scan_id, tenant_id, data, scan_state, config, started_at, db_config=db_config)
 
             # Stream ended normally
             if scan_state["status"] in ("running", "pending"):
@@ -248,7 +264,7 @@ def execute_scan(
                 html_report_path=scan_state.get("html_report_path"),
                 report_key=scan_state.get("report_key"),
                 html_report_key=scan_state.get("html_report_key"),
-                config_dict=config, started_at=started_at,
+                config_dict=db_config, started_at=started_at,
             )
             _publish_progress(scan_id, tenant_id, {
                 "event_type": "complete",
@@ -256,6 +272,8 @@ def execute_scan(
                 "passed": scan_state["passed"],
                 "failed": scan_state["failed"],
             })
+            # Wipe credentials from memory (defense in depth)
+            injected_config.pop("credentials", None)
             return scan_state
 
         except Exception as e:
@@ -271,7 +289,7 @@ def execute_scan(
                 scan_id=scan_id, tenant_id=tenant_id, status="failed",
                 error_message=scan_state["error_message"],
                 completed_at=scan_state["completed_at"],
-                config_dict=config, started_at=started_at,
+                config_dict=db_config, started_at=started_at,
             )
             return scan_state
 
@@ -285,11 +303,18 @@ def _process_sse_event(
     scan_state: dict,
     config: dict,
     started_at: str,
+    db_config: dict = None,
 ) -> None:
     """Process a single SSE event from the garak service.
 
     Updates scan_state in place, syncs to DB, and publishes to Redis.
+
+    Args:
+        db_config: Sanitized config for DB persistence (no credentials).
+                   Falls back to ``config`` if not provided.
     """
+    if db_config is None:
+        db_config = config
     etype = event.get("event_type")
 
     if etype == "status":
@@ -322,7 +347,7 @@ def _process_sse_event(
             failed=scan_state["failed"],
             report_path=scan_state.get("report_path"),
             html_report_path=scan_state.get("html_report_path"),
-            config_dict=config, started_at=started_at,
+            config_dict=db_config, started_at=started_at,
         )
 
     elif etype == "complete":

@@ -130,6 +130,58 @@ class CustomProbeRow(Base):
         }
 
 
+class Target(Base):
+    """Registered scan target — stores non-sensitive metadata in Postgres.
+
+    Sensitive fields (API keys, auth tokens) are stored in Prism and
+    referenced via ``credential_prism_key``. The ``config_json`` column
+    holds non-sensitive target configuration only (endpoint, body
+    template, response extraction path).
+    """
+    __tablename__ = "targets"
+
+    id = Column(String, primary_key=True)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
+    name = Column(String, nullable=False)
+    target_type = Column(String, nullable=False, default="rest")
+    endpoint = Column(String, nullable=False)
+    body_template = Column(Text, nullable=True)
+    response_json_field = Column(String, nullable=True)
+    config_json = Column(Text, nullable=True)  # Non-sensitive config only
+    credential_prism_key = Column(String, nullable=True)  # Prism key ref
+    has_credentials = Column(Boolean, default=False)
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        Index("idx_targets_tenant", "tenant_id"),
+        Index("idx_targets_name_tenant", "name", "tenant_id"),
+    )
+
+    def to_dict(self):
+        """Convert to API response dict (never includes credential values)."""
+        import json as _json
+        config = None
+        if self.config_json:
+            try:
+                config = _json.loads(self.config_json)
+            except (ValueError, TypeError):
+                pass
+        return {
+            "target_id": self.id,
+            "tenant_id": self.tenant_id or "default",
+            "name": self.name,
+            "type": self.target_type,
+            "endpoint": self.endpoint,
+            "body_template": self.body_template,
+            "response_json_field": self.response_json_field,
+            "config": config,
+            "has_credentials": self.has_credentials or False,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
 class DBMeta(Base):
     """Simple schema version tracking."""
     __tablename__ = "db_meta"
