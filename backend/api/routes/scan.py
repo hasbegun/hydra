@@ -22,12 +22,14 @@ from models.schemas import (
     ScanStatisticsResponse,
 )
 from services.garak_wrapper import garak_wrapper, MaxConcurrentScansError
+from services.gate_evaluator import GatePolicy, evaluate_gate, build_findings_summary
 from middleware.tenant import get_tenant
 from datetime import datetime
 from typing import Optional
 import asyncio
 import logging
 import math
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -540,3 +542,102 @@ async def scan_progress_websocket(websocket: WebSocket, scan_id: str):
             await websocket.send_json({"error": str(e)})
         except:
             pass
+
+
+@router.post("/gate")
+async def gate_scan(request: Request, body: dict):
+    """CI/CD gate endpoint — enqueue scan, wait, evaluate policy, return verdict.
+
+    This is a synchronous blocking endpoint. It:
+    1. Enqueues a scan on the express queue
+    2. Polls for completion (up to ``timeout`` seconds)
+    3. Evaluates the gate policy against scan results
+    4. Returns a pass/fail verdict
+
+    Request body:
+        target_id: str — registered target to scan
+        probes: list[str] — probes to run (optional, defaults to fast set)
+        policy: dict — gate policy (min_pass_rate, max_critical, max_high, ...)
+        timeout: int — max seconds to wait (default 300)
+        compare_to: str — "last" or a specific scan_id for regression check
+    """
+    tenant = get_tenant(request)
+
+    target_id = body.get("target_id")
+    if not target_id:
+        raise HTTPException(400, "target_id is required")
+
+    policy = GatePolicy.from_dict(body.get("policy", {}))
+    timeout_secs = min(body.get("timeout", 300), 600)  # Cap at 10 minutes
+
+    scan_id = f"gate_{uuid.uuid4().hex[:12]}"
+    config = {
+        "target_id": target_id,
+        "probes": body.get("probes", ["dan.Dan_11_0"]),
+        "preset": body.get("preset", "fast"),
+        "source": "ci_gate",
+    }
+
+    # Enqueue on express queue for low latency
+    try:
+        from tasks.scan_task import execute_scan
+        execute_scan.apply_async(
+            args=[scan_id, config],
+            kwargs={"tenant_id": tenant.tenant_id},
+            queue="express",
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Failed to enqueue gate scan: {e}")
+
+    # Poll for completion
+    elapsed = 0
+    poll_interval = 2
+    scan_result = None
+
+    while elapsed < timeout_secs:
+        await asyncio.sleep(poll_interval)
+        elapsed += poll_interval
+
+        scan_info = garak_wrapper.get_scan_status(scan_id, tenant_id=tenant.tenant_id)
+        if scan_info and scan_info.get("status") in ("completed", "failed", "error"):
+            scan_result = scan_info
+            break
+
+    if not scan_result:
+        return {
+            "gate_passed": False,
+            "scan_id": scan_id,
+            "error": f"Scan did not complete within {timeout_secs}s",
+            "risk_score": None,
+            "findings_summary": None,
+        }
+
+    if scan_result.get("status") in ("failed", "error"):
+        return {
+            "gate_passed": False,
+            "scan_id": scan_id,
+            "error": scan_result.get("error_message", "Scan failed"),
+            "risk_score": None,
+            "findings_summary": None,
+        }
+
+    # Fetch previous scan for regression comparison
+    previous_result = None
+    if policy.check_regression:
+        if policy.compare_to == "last":
+            scans = garak_wrapper.get_all_scans(tenant_id=tenant.tenant_id)
+            completed = [
+                s for s in scans
+                if s.get("status") == "completed" and s.get("scan_id") != scan_id
+            ]
+            if completed:
+                previous_result = completed[0]  # Most recent
+        elif policy.compare_to:
+            previous_result = garak_wrapper.get_scan_status(
+                policy.compare_to, tenant_id=tenant.tenant_id
+            )
+
+    verdict = evaluate_gate(scan_result, policy, previous_result)
+    result = verdict.to_dict()
+    result["scan_id"] = scan_id
+    return result

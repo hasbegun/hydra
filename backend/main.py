@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from api.routes import scan, plugins, config, system, custom_probes, workflow, models
+from api.routes import scan, plugins, config, system, custom_probes, workflow, models, targets, campaigns, hooks, schedules, webhooks
 from config import settings
 from middleware.tenant import TenantMiddleware
 from logging_config import setup_logging
@@ -122,6 +122,11 @@ app.include_router(system.router, prefix="/api/v1/system", tags=["System"])
 app.include_router(custom_probes.router, prefix="/api/v1/probes/custom", tags=["Custom Probes"])
 app.include_router(workflow.router, tags=["Workflow"])
 app.include_router(models.router, prefix="/api/v1/generators", tags=["Models"])
+app.include_router(targets.router, prefix="/api/v1/targets", tags=["Targets"])
+app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["Campaigns"])
+app.include_router(hooks.router, prefix="/api/v1/hooks", tags=["Hooks"])
+app.include_router(schedules.router, prefix="/api/v1/schedules", tags=["Schedules"])
+app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["Webhooks"])
 
 
 @app.get("/")

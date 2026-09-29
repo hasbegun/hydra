@@ -95,8 +95,13 @@ class TargetService:
         clean_payload = _strip_credentials(payload)
         non_sensitive_config = {
             k: v for k, v in clean_payload.items()
-            if k not in ("name", "type", "endpoint", "body_template", "response_json_field")
+            if k not in ("name", "type", "endpoint", "body_template", "response_json_field", "tags")
         }
+
+        # Serialize tags as JSON array
+        tags_json = None
+        if payload.get("tags"):
+            tags_json = json.dumps(payload["tags"])
 
         with get_db() as db:
             target = Target(
@@ -107,6 +112,7 @@ class TargetService:
                 endpoint=payload.get("endpoint", ""),
                 body_template=payload.get("body_template"),
                 response_json_field=payload.get("response_json_field"),
+                tags=tags_json,
                 config_json=json.dumps(non_sensitive_config) if non_sensitive_config else None,
                 credential_prism_key=prism_key,
                 has_credentials=has_creds,
@@ -152,6 +158,38 @@ class TargetService:
                 .all()
             )
             return [t.to_dict() for t in targets]
+
+    def update_target(self, tenant_id: str, target_id: str, payload: dict) -> Optional[dict]:
+        """Update non-sensitive target metadata (not credentials).
+
+        Credential rotation uses ``rotate_credentials`` instead.
+        """
+        from database.session import get_db
+        from database.models import Target
+        import json as _json
+
+        with get_db() as db:
+            target = (
+                db.query(Target)
+                .filter_by(id=target_id, tenant_id=tenant_id)
+                .first()
+            )
+            if not target:
+                return None
+
+            # Update allowed non-sensitive fields
+            for field in ("name", "endpoint", "body_template", "response_json_field"):
+                if field in payload:
+                    setattr(target, field, payload[field])
+            if "type" in payload:
+                target.target_type = payload["type"]
+            if "tags" in payload:
+                target.tags = _json.dumps(payload["tags"]) if payload["tags"] else None
+
+            target.updated_at = datetime.utcnow().isoformat()
+            db.commit()
+            db.refresh(target)
+            return target.to_dict()
 
     def delete_target(self, tenant_id: str, target_id: str) -> bool:
         """Delete a target and its credentials from Prism."""
