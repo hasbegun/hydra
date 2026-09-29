@@ -137,8 +137,26 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy"}
+    """Health check endpoint with component status."""
+    components = {}
+
+    # Prism connectivity (if enabled)
+    from services.prism_client import prism_available
+    if prism_available():
+        try:
+            from services.prism_client import get_prism_client
+            prism = get_prism_client()
+            prism_ok = await prism.health()
+            components["prism"] = "connected" if prism_ok else "degraded"
+        except Exception:
+            components["prism"] = "degraded"
+
+    # Overall status: degraded if any component is degraded
+    overall = "healthy"
+    if any(v == "degraded" for v in components.values()):
+        overall = "degraded"
+
+    return {"status": overall, **components}
 
 
 @app.get("/version")

@@ -1,13 +1,15 @@
 """
 Object storage abstraction for report artifacts (JSONL, HTML, hitlog).
 
-Two backends:
+Three backends:
   - LocalStorage: reads/writes files on a local/shared filesystem (legacy)
   - MinioStorage: reads/writes objects via S3-compatible Minio API
+  - PrismStorage: reads/writes via Prism SMPC with Redis cache + Minio fallback
 
-Selected by the STORAGE_BACKEND env var ("local" or "minio").
+Selected by the STORAGE_BACKEND env var ("local", "minio", or "prism").
 """
 import io
+import json
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -196,6 +198,181 @@ class MinioStorage(StorageBackend):
         return sorted(obj.object_name for obj in objects)
 
 
+class PrismStorage(StorageBackend):
+    """Prism SMPC-backed storage with Redis read cache and Minio fallback.
+
+    Read path:  Redis cache (5 min TTL) -> Prism -> Minio fallback
+    Write path: Prism -> Minio fallback (if Prism unreachable)
+    Delete:     Prism + Redis cache invalidation
+
+    All keys are scoped by tenant_id to enforce data isolation.
+    Uses a default tenant_id for backward compatibility when the caller
+    does not supply one.
+    """
+
+    def __init__(
+        self,
+        tenant_id: str = "default",
+        fallback: Optional[StorageBackend] = None,
+        cache_ttl: int = 300,
+    ):
+        from services.prism_client import PrismClient
+
+        self._prism = PrismClient()
+        self._tenant_id = tenant_id
+        self._fallback = fallback
+        self._cache_ttl = cache_ttl
+        self._redis = self._init_redis()
+        logger.info(
+            f"PrismStorage initialized (tenant={tenant_id}, "
+            f"cache_ttl={cache_ttl}s, fallback={'yes' if fallback else 'no'})"
+        )
+
+    @staticmethod
+    def _init_redis():
+        """Create a Redis client for caching. Returns None if unavailable."""
+        try:
+            import redis as redis_lib
+            from config import settings
+            return redis_lib.from_url(settings.redis_url, decode_responses=False)
+        except Exception as e:
+            logger.warning(f"Redis unavailable for PrismStorage cache: {e}")
+            return None
+
+    def _cache_key(self, key: str) -> str:
+        """Build the Redis cache key."""
+        return f"prism:cache:{self._tenant_id}/{key}"
+
+    def _cache_get(self, key: str) -> Optional[bytes]:
+        """Read from Redis cache. Returns None on miss or error."""
+        if not self._redis:
+            return None
+        try:
+            data = self._redis.get(self._cache_key(key))
+            if data is not None:
+                logger.debug(f"PrismStorage cache hit: {key}")
+            return data
+        except Exception as e:
+            logger.debug(f"PrismStorage cache read error: {e}")
+            return None
+
+    def _cache_set(self, key: str, data: bytes) -> None:
+        """Write to Redis cache with TTL. Best-effort."""
+        if not self._redis:
+            return
+        try:
+            self._redis.setex(self._cache_key(key), self._cache_ttl, data)
+        except Exception as e:
+            logger.debug(f"PrismStorage cache write error: {e}")
+
+    def _cache_delete(self, key: str) -> None:
+        """Invalidate Redis cache entry. Best-effort."""
+        if not self._redis:
+            return
+        try:
+            self._redis.delete(self._cache_key(key))
+        except Exception as e:
+            logger.debug(f"PrismStorage cache delete error: {e}")
+
+    def get(self, key: str) -> Optional[bytes]:
+        # 1. Redis cache
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
+
+        # 2. Prism
+        try:
+            data = self._prism.fetch_sync(self._tenant_id, key)
+            if data is not None:
+                self._cache_set(key, data)
+                return data
+        except Exception as e:
+            logger.warning(f"PrismStorage.get Prism error for '{key}': {e}")
+
+        # 3. Minio fallback
+        if self._fallback:
+            try:
+                data = self._fallback.get(key)
+                if data is not None:
+                    logger.info(f"PrismStorage.get fallback hit: {key}")
+                    return data
+            except Exception as e:
+                logger.warning(f"PrismStorage.get fallback error for '{key}': {e}")
+
+        return None
+
+    def get_stream(self, key: str):
+        data = self.get(key)
+        if data is None:
+            return None
+        return io.BytesIO(data)
+
+    def put(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+        try:
+            self._prism.store_sync(self._tenant_id, key, data)
+            self._cache_set(key, data)
+            return
+        except Exception as e:
+            logger.warning(f"PrismStorage.put Prism error for '{key}': {e}")
+
+        # Fallback to Minio
+        if self._fallback:
+            self._fallback.put(key, data, content_type)
+            logger.info(f"PrismStorage.put fallback used for '{key}'")
+        else:
+            raise
+
+    def put_file(self, key: str, file_path: str, content_type: str = "application/octet-stream") -> None:
+        src = Path(file_path)
+        if not src.exists():
+            raise FileNotFoundError(f"Source file not found: {file_path}")
+        self.put(key, src.read_bytes(), content_type)
+
+    def exists(self, key: str) -> bool:
+        # Check cache first
+        if self._cache_get(key) is not None:
+            return True
+        # Check Prism
+        try:
+            data = self._prism.fetch_sync(self._tenant_id, key)
+            if data is not None:
+                self._cache_set(key, data)
+                return True
+        except Exception as e:
+            logger.debug(f"PrismStorage.exists Prism error for '{key}': {e}")
+        # Fallback
+        if self._fallback:
+            return self._fallback.exists(key)
+        return False
+
+    def delete(self, key: str) -> bool:
+        self._cache_delete(key)
+        try:
+            result = self._prism.delete_sync(self._tenant_id, key)
+            if result:
+                return True
+        except Exception as e:
+            logger.warning(f"PrismStorage.delete Prism error for '{key}': {e}")
+        # Also try fallback delete
+        if self._fallback:
+            return self._fallback.delete(key)
+        return False
+
+    def list_keys(self, prefix: str = "") -> list[str]:
+        # Prism doesn't support listing — delegate to fallback
+        if self._fallback:
+            return self._fallback.list_keys(prefix)
+        return []
+
+    def set_tenant(self, tenant_id: str) -> None:
+        """Update the tenant context for subsequent operations.
+
+        Allows a single PrismStorage instance to serve multiple tenants
+        by switching tenant_id between calls (e.g. in route handlers).
+        """
+        self._tenant_id = tenant_id
+
+
 # ---------------------------------------------------------------------------
 # Singleton: initialized once at startup, used by all services
 # ---------------------------------------------------------------------------
@@ -207,6 +384,8 @@ def init_object_store() -> StorageBackend:
     """Initialize the global object store based on configuration.
 
     Called once at application startup (in main.py lifespan).
+    Supports three backends: "local", "minio", and "prism".
+    When "prism" is selected, MinioStorage is created as a fallback.
     """
     global _store
 
@@ -214,7 +393,27 @@ def init_object_store() -> StorageBackend:
 
     backend = settings.storage_backend.lower()
 
-    if backend == "minio":
+    if backend == "prism":
+        # Build Minio fallback (if credentials are configured)
+        fallback = None
+        if settings.prism_fallback_to_minio and settings.minio_secret_key:
+            try:
+                fallback = MinioStorage(
+                    endpoint=settings.minio_endpoint,
+                    access_key=settings.minio_access_key,
+                    secret_key=settings.minio_secret_key,
+                    bucket=settings.minio_bucket,
+                    secure=settings.minio_secure,
+                )
+            except Exception as e:
+                logger.warning(f"Minio fallback init failed (non-fatal): {e}")
+
+        _store = PrismStorage(
+            tenant_id="default",
+            fallback=fallback,
+            cache_ttl=settings.prism_cache_ttl,
+        )
+    elif backend == "minio":
         _store = MinioStorage(
             endpoint=settings.minio_endpoint,
             access_key=settings.minio_access_key,

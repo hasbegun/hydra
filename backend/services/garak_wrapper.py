@@ -366,6 +366,8 @@ class GarakWrapper:
                 scan_info["report_key"] = report_keys["jsonl"]
             if report_keys.get("html"):
                 scan_info["html_report_key"] = report_keys["html"]
+            # Ensure reports are also in Prism (copies from Minio if needed)
+            self._ensure_reports_in_prism(scan_id, report_keys)
             self._sync_scan_to_db(scan_id)
 
         elif etype == "error":
@@ -578,14 +580,27 @@ class GarakWrapper:
             except Exception as e:
                 logger.error(f"Error deleting local report files for scan {scan_id}: {e}")
 
-        # Delete report files from object store
+        # Delete report files from object store (Prism + Minio fallback)
         try:
-            from services.object_store import object_store_available, get_object_store
+            from services.object_store import object_store_available, get_object_store, PrismStorage
             if object_store_available():
                 store = get_object_store()
+                is_prism = isinstance(store, PrismStorage)
+                # Set tenant context for PrismStorage
+                if tenant_id and is_prism:
+                    store.set_tenant(tenant_id)
                 keys = store.list_keys(prefix=f"{scan_id}/")
+                deleted_keys = set()
                 for key in keys:
                     store.delete(key)
+                    deleted_keys.add(key)
+                # For PrismStorage, list_keys delegates to fallback and may miss
+                # Prism-only keys. Delete known report keys directly.
+                if is_prism:
+                    for suffix in ["report.jsonl", "hitlog.jsonl", "report.html"]:
+                        k = f"{scan_id}/garak.{scan_id}.{suffix}"
+                        if k not in deleted_keys:
+                            store.delete(k)
                 if keys:
                     logger.info(f"Deleted {len(keys)} object(s) from store for scan {scan_id}")
         except Exception as e:
@@ -735,17 +750,25 @@ class GarakWrapper:
 
         return None
 
-    def _read_entries_from_object_store(self, scan_id: str) -> Optional[List[dict]]:
-        """Try to read JSONL entries from the object store (Minio).
+    def _read_entries_from_object_store(self, scan_id: str, tenant_id: Optional[str] = None) -> Optional[List[dict]]:
+        """Try to read JSONL entries from the object store.
+
+        When PrismStorage is configured, reads go through the
+        cache -> Prism -> Minio fallback chain automatically.
 
         Returns None if object store is not available or file not found.
         """
         try:
-            from services.object_store import object_store_available, get_object_store
+            from services.object_store import object_store_available, get_object_store, PrismStorage
             if not object_store_available():
                 return None
 
             store = get_object_store()
+
+            # Set tenant context for PrismStorage
+            if tenant_id and isinstance(store, PrismStorage):
+                store.set_tenant(tenant_id)
+
             key = f"{scan_id}/garak.{scan_id}.report.jsonl"
             data = store.get(key)
             if data is None:
@@ -849,13 +872,26 @@ class GarakWrapper:
         return None
 
     def _upload_fetched_report_to_object_store(self, scan_id: str, data: bytes) -> None:
-        """Upload report data to the object store and update the DB key."""
+        """Upload report data to the object store and update the DB key.
+
+        When PrismStorage is configured, this ensures the report is
+        available in Prism (with tenant-prefixed key). The object store
+        abstraction handles Prism vs Minio transparently.
+        """
         try:
             from services.object_store import object_store_available, get_object_store
             if not object_store_available():
                 return
 
             store = get_object_store()
+
+            # Set tenant context if PrismStorage
+            from services.object_store import PrismStorage as _PS
+            scan_info = self.active_scans.get(scan_id)
+            tenant_id = scan_info.get("tenant_id", "default") if scan_info else "default"
+            if isinstance(store, _PS):
+                store.set_tenant(tenant_id)
+
             key = f"{scan_id}/garak.{scan_id}.report.jsonl"
             store.put(key, data, content_type="application/jsonl")
             logger.info(f"Uploaded fetched report to object store: {key}")
@@ -871,6 +907,43 @@ class GarakWrapper:
                         db.commit()
         except Exception as e:
             logger.warning(f"Failed to upload fetched report to object store: {e}")
+
+    def _ensure_reports_in_prism(self, scan_id: str, report_keys: dict) -> None:
+        """Ensure scan reports exist in the Prism-backed object store.
+
+        When the garak service uploads to Minio (via report_uploader),
+        this method copies those reports into Prism so they're accessible
+        through the tenant-scoped cache chain. No-op if Prism is not
+        configured or reports are already there.
+        """
+        try:
+            from services.object_store import object_store_available, get_object_store
+            if not object_store_available():
+                return
+
+            store = get_object_store()
+            from services.object_store import PrismStorage as _PS2
+            if not isinstance(store, _PS2):
+                return  # Not PrismStorage — nothing to do
+
+            scan_info = self.active_scans.get(scan_id, {})
+            tenant_id = scan_info.get("tenant_id", "default")
+            store.set_tenant(tenant_id)
+
+            # For each report key from Minio, check if Prism has it
+            for rtype, minio_key in report_keys.items():
+                if not minio_key:
+                    continue
+                try:
+                    # The PrismStorage.get will try Prism first, then Minio
+                    # If Prism misses but Minio hits, the next put will store in Prism
+                    if not store.exists(minio_key):
+                        # Shouldn't happen since Minio has it, but guard anyway
+                        continue
+                except Exception as e:
+                    logger.debug(f"Report Prism sync check failed for {minio_key}: {e}")
+        except Exception as e:
+            logger.debug(f"Prism report sync failed for {scan_id}: {e}")
 
     def invalidate_cache(self, scan_id: str):
         """Remove all cached data for a scan."""

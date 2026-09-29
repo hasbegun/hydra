@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"          # Broker (task queue)
     redis_result_url: str = "redis://redis:6379/1"   # Result backend
 
+    # Prism Configuration (SMPC secret-sharing storage)
+    prism_url: str = "http://prism:8080"              # Prism service base URL
+    prism_api_key: str = ""                           # Prism API key (set via PRISM_API_KEY env)
+    prism_timeout: float = 30.0                       # HTTP timeout for Prism requests (seconds)
+    prism_cache_ttl: int = 300                        # Redis cache TTL for Prism reads (seconds)
+    prism_enabled: bool = True                        # Enable Prism for report/credential storage
+    prism_fallback_to_minio: bool = True              # Fall back to Minio when Prism is unreachable
+
     # Sandbox Configuration
     sandbox_enabled: bool = True                      # Enable sandboxed scan execution
     sandbox_image: str = "hydra-sandbox:latest"       # Docker image for sandbox containers
