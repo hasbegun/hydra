@@ -146,7 +146,11 @@ async def get_campaign_evidence(request: Request, campaign_id: str):
     package = build_compliance_package(report)
 
     # Render evidence PDF (uses shared Jinja2 env from pdf_renderer)
-    branding = None  # TODO: load from TenantBranding in Phase 5
+    try:
+        from services.portfolio_service import get_branding_for_pdf
+        branding = get_branding_for_pdf(tenant.tenant_id)
+    except Exception:
+        branding = None
     pdf_bytes = render_evidence_pdf(package, branding)
 
     is_pdf = pdf_bytes[:5] == b"%PDF-"

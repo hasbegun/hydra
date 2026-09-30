@@ -627,7 +627,11 @@ async def get_report_pdf(request: Request, scan_id: str):
         )
 
     # Load tenant branding (if configured)
-    branding = None  # TODO: load from TenantBranding table in Phase 5
+    try:
+        from services.portfolio_service import get_branding_for_pdf
+        branding = get_branding_for_pdf(tenant.tenant_id)
+    except Exception:
+        branding = None
 
     pdf_bytes = render_pdf(report, branding)
 
@@ -701,7 +705,7 @@ async def scan_progress_websocket(websocket: WebSocket, scan_id: str):
         logger.error(f"WebSocket error for scan {scan_id}: {e}")
         try:
             await websocket.send_json({"error": str(e)})
-        except:
+        except Exception:
             pass
 
 
