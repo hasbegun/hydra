@@ -21,6 +21,44 @@ logger = logging.getLogger(__name__)
 PROGRESS_CHANNEL = "scan:{tenant_id}:{scan_id}:progress"
 
 
+def _update_portfolio_summary(scan_id: str, tenant_id: str, status: str) -> None:
+    """Best-effort update of the materialized TenantSummary row.
+
+    Fires after scan completion/failure. Non-critical — if it fails,
+    the portfolio dashboard will just show stale data until the next scan.
+    """
+    try:
+        from services.portfolio_service import update_tenant_summary
+        from services.report_generator import load_report_from_prism
+
+        risk_score = 0.0
+        critical = high = medium = low = total_findings = 0
+
+        if status == "completed":
+            report = load_report_from_prism(scan_id, tenant_id)
+            if report:
+                risk_score = report.executive_summary.risk_score
+                critical = report.executive_summary.critical_count
+                high = report.executive_summary.high_count
+                medium = report.executive_summary.medium_count
+                low = report.executive_summary.low_count
+                total_findings = report.executive_summary.failed
+
+        update_tenant_summary(
+            tenant_id=tenant_id,
+            scan_id=scan_id,
+            risk_score=risk_score,
+            critical=critical,
+            high=high,
+            medium=medium,
+            low=low,
+            total_findings=total_findings,
+            status=status,
+        )
+    except Exception as e:
+        logger.warning("Portfolio summary update failed (non-critical): %s", e)
+
+
 def _publish_progress(scan_id: str, tenant_id: str, event: dict) -> None:
     """Publish a progress event to Redis Pub/Sub.
 
@@ -153,6 +191,14 @@ def execute_scan(
         "event_type": "status", "status": "pending", "scan_id": scan_id,
     })
 
+    # --- Panopticon: emit scan_started trace (fire-and-forget) ---
+    try:
+        from services.panopticon_client import get_panopticon_client
+        pano = get_panopticon_client()
+        pano.scan_started(scan_id, tenant_id, config)
+    except Exception as e:
+        logger.debug("Panopticon scan_started emission failed (non-critical): %s", e)
+
     # --- Step 0.5: Fetch target credentials from Prism (if target_id set) ---
     injected_config = dict(config)  # shallow copy — credentials held only here
     target_id = config.get("target_id")
@@ -272,6 +318,14 @@ def execute_scan(
                 "passed": scan_state["passed"],
                 "failed": scan_state["failed"],
             })
+            # Update portfolio summary (best-effort, non-blocking)
+            _update_portfolio_summary(scan_id, tenant_id, scan_state["status"])
+            # Panopticon: emit scan_completed trace
+            try:
+                pano = get_panopticon_client()
+                pano.scan_completed(scan_id, scan_state["passed"], scan_state["failed"])
+            except Exception:
+                pass
             # Wipe credentials from memory (defense in depth)
             injected_config.pop("credentials", None)
             return scan_state
@@ -291,6 +345,13 @@ def execute_scan(
                 completed_at=scan_state["completed_at"],
                 config_dict=db_config, started_at=started_at,
             )
+            _update_portfolio_summary(scan_id, tenant_id, "failed")
+            # Panopticon: emit scan_failed trace
+            try:
+                pano = get_panopticon_client()
+                pano.scan_failed(scan_id, scan_state.get("error_message", ""))
+            except Exception:
+                pass
             return scan_state
 
     return scan_state
@@ -324,6 +385,14 @@ def _process_sse_event(
         scan_state["current_probe"] = event.get("probe")
         scan_state["progress"] = float(event.get("percent", scan_state["progress"]))
         scan_state["status"] = "running"
+        # Panopticon: emit probe_running span
+        try:
+            from services.panopticon_client import get_panopticon_client
+            pano = get_panopticon_client()
+            if pano.enabled and event.get("probe"):
+                pano.probe_running(scan_id, event["probe"])
+        except Exception:
+            pass
 
     elif etype == "probe_count":
         scan_state["total_probes"] = event.get("total", 0)
@@ -331,6 +400,27 @@ def _process_sse_event(
     elif etype == "result":
         scan_state["passed"] = event.get("total_passed", scan_state["passed"])
         scan_state["failed"] = event.get("total_failed", scan_state["failed"])
+        # Panopticon: emit probe_completed span
+        try:
+            from services.panopticon_client import get_panopticon_client
+            pano = get_panopticon_client()
+            if pano.enabled and event.get("probe"):
+                pano.probe_completed(
+                    scan_id, event["probe"],
+                    passed=event.get("passed", 0),
+                    failed=event.get("failed", 0),
+                )
+                # Emit security flag if critical failures detected
+                severity = event.get("severity", "")
+                if severity in ("critical", "high") and event.get("failed", 0) > 0:
+                    flag_type = "jailbreak" if "dan" in event["probe"].lower() else "prompt_injection"
+                    pano.security_flag(
+                        scan_id, flag_type, event["probe"],
+                        severity=severity,
+                        details=f"{event.get('failed', 0)} failures detected",
+                    )
+        except Exception:
+            pass
 
     elif etype == "report":
         rtype = event.get("report_type")

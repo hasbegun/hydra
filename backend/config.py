@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     sandbox_reports_dir: str = "/data/garak_reports"  # Host dir for extracted reports
     sandbox_network_mode: str = "none"                # Default network mode (none = isolated)
 
+    # Panopticon Configuration (observability trace emission)
+    panopticon_enabled: bool = False                    # Enable Panopticon trace emission
+    panopticon_url: str = "http://panopticon:8080"     # Panopticon ingest endpoint
+    panopticon_api_key: str = ""                       # Panopticon API key (set via env)
+    panopticon_timeout: float = 5.0                    # HTTP timeout for Panopticon (seconds)
+    panopticon_batch_size: int = 50                    # Max events per batch flush
+
     @property
     def garak_reports_path(self) -> Path:
         """Get the garak reports directory path"""
