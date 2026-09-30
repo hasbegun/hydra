@@ -23,6 +23,13 @@ from models.schemas import (
 )
 from services.garak_wrapper import garak_wrapper, MaxConcurrentScansError
 from services.gate_evaluator import GatePolicy, evaluate_gate, build_findings_summary
+from services.report_generator import (
+    generate_vulnerability_report,
+    store_report_in_prism,
+    load_report_from_prism,
+)
+from services.comparison_engine import compare_reports
+from services.pdf_renderer import render_pdf, store_pdf_in_prism
 from middleware.tenant import get_tenant
 from datetime import datetime
 from typing import Optional
@@ -483,6 +490,160 @@ async def get_probe_attempts(
             detail=f"No attempts found for probe {probe_classname} in scan {scan_id}",
         )
     return result
+
+
+@router.get("/{scan_id}/report/vulnerability")
+async def get_vulnerability_report(request: Request, scan_id: str):
+    """Return a structured vulnerability report for a completed scan.
+
+    Checks Prism for a cached report first. If not found, generates from
+    raw JSONL entries and stores in Prism for future requests.
+    """
+    tenant = get_tenant(request)
+
+    # Verify tenant has access
+    scan_info = garak_wrapper.get_scan_status(scan_id, tenant_id=tenant.tenant_id)
+    if not scan_info:
+        raise HTTPException(404, f"Scan {scan_id} not found")
+
+    if scan_info.get("status") != "completed":
+        raise HTTPException(
+            400, f"Scan {scan_id} has status '{scan_info.get('status')}' — report requires completed scan"
+        )
+
+    # Try loading cached report from Prism
+    cached = load_report_from_prism(scan_id, tenant.tenant_id)
+    if cached:
+        return cached.model_dump()
+
+    # Generate from raw JSONL entries
+    entries = garak_wrapper._get_report_entries(scan_id)
+    if entries is None:
+        raise HTTPException(404, f"No report data found for scan {scan_id}")
+
+    # Extract target info from scan config
+    config = scan_info.get("config")
+    target_name = ""
+    target_type = ""
+    if config:
+        cfg = config.model_dump() if hasattr(config, "model_dump") else config
+        target_name = cfg.get("target_name", cfg.get("model_name", ""))
+        target_type = cfg.get("target_type", cfg.get("model_type", ""))
+
+    report = generate_vulnerability_report(
+        scan_id=scan_id,
+        entries=entries,
+        tenant_id=tenant.tenant_id,
+        target_name=target_name,
+        target_type=target_type,
+    )
+
+    # Store in Prism for caching
+    store_report_in_prism(report, tenant.tenant_id)
+
+    return report.model_dump()
+
+
+@router.get("/{scan_id}/report/comparison")
+async def get_report_comparison(
+    request: Request,
+    scan_id: str,
+    compare_to: str = Query(..., description="Scan ID to compare against (baseline)"),
+):
+    """Compare two scan reports — shows new findings, resolved, regressions, risk delta.
+
+    The ``compare_to`` scan is the baseline; ``scan_id`` is the current.
+    """
+    tenant = get_tenant(request)
+
+    # Verify current scan
+    current_info = garak_wrapper.get_scan_status(scan_id, tenant_id=tenant.tenant_id)
+    if not current_info:
+        raise HTTPException(404, f"Scan {scan_id} not found")
+    if current_info.get("status") != "completed":
+        raise HTTPException(400, f"Scan {scan_id} is not completed")
+
+    # Verify baseline scan
+    baseline_info = garak_wrapper.get_scan_status(compare_to, tenant_id=tenant.tenant_id)
+    if not baseline_info:
+        raise HTTPException(404, f"Baseline scan {compare_to} not found")
+
+    # Load or generate current report
+    current_report = load_report_from_prism(scan_id, tenant.tenant_id)
+    if not current_report:
+        entries = garak_wrapper._get_report_entries(scan_id)
+        if not entries:
+            raise HTTPException(404, f"No report data for scan {scan_id}")
+        current_report = generate_vulnerability_report(
+            scan_id, entries, tenant_id=tenant.tenant_id,
+        )
+
+    # Load or generate baseline report
+    baseline_report = load_report_from_prism(compare_to, tenant.tenant_id)
+    if not baseline_report:
+        entries = garak_wrapper._get_report_entries(compare_to)
+        if entries:
+            baseline_report = generate_vulnerability_report(
+                compare_to, entries, tenant_id=tenant.tenant_id,
+            )
+
+    result = compare_reports(baseline_report, current_report)
+    return result.to_dict()
+
+
+@router.get("/{scan_id}/report/pdf")
+async def get_report_pdf(request: Request, scan_id: str):
+    """Generate and return a branded PDF vulnerability report.
+
+    Returns ``application/pdf`` when weasyprint is available, otherwise
+    ``text/html`` as a fallback.
+    """
+    from fastapi.responses import Response
+
+    tenant = get_tenant(request)
+
+    scan_info = garak_wrapper.get_scan_status(scan_id, tenant_id=tenant.tenant_id)
+    if not scan_info:
+        raise HTTPException(404, f"Scan {scan_id} not found")
+    if scan_info.get("status") != "completed":
+        raise HTTPException(400, f"Scan {scan_id} is not completed")
+
+    # Load or generate the vulnerability report
+    report = load_report_from_prism(scan_id, tenant.tenant_id)
+    if not report:
+        entries = garak_wrapper._get_report_entries(scan_id)
+        if not entries:
+            raise HTTPException(404, f"No report data for scan {scan_id}")
+        config = scan_info.get("config")
+        target_name = ""
+        target_type = ""
+        if config:
+            cfg = config.model_dump() if hasattr(config, "model_dump") else config
+            target_name = cfg.get("target_name", cfg.get("model_name", ""))
+            target_type = cfg.get("target_type", cfg.get("model_type", ""))
+        report = generate_vulnerability_report(
+            scan_id, entries, tenant_id=tenant.tenant_id,
+            target_name=target_name, target_type=target_type,
+        )
+
+    # Load tenant branding (if configured)
+    branding = None  # TODO: load from TenantBranding table in Phase 5
+
+    pdf_bytes = render_pdf(report, branding)
+
+    # Store in Prism for caching
+    store_pdf_in_prism(pdf_bytes, scan_id, tenant.tenant_id)
+
+    # Detect if this is real PDF or HTML fallback
+    is_pdf = pdf_bytes[:5] == b"%PDF-"
+    content_type = "application/pdf" if is_pdf else "text/html; charset=utf-8"
+    filename = f"hydra-report-{scan_id}.pdf" if is_pdf else f"hydra-report-{scan_id}.html"
+
+    return Response(
+        content=pdf_bytes,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.websocket("/{scan_id}/progress")
